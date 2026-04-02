@@ -11,7 +11,7 @@ This was created by running
 ```
 python scripts/reformat_lvis_json.py
 ```
-If you need a different category split you can edit the ```valid_cat_ids``` variable. 
+If you need a different category split you can edit the ```valid_cat_ids``` variable in the script. 
 
 Before evaluating on LVIS data, make sure all file paths in the yaml files [here](./sam3/train/configs/lvis) are appropriate for your setup, which would require updating the all ```img_path``` vars to point to your combined COCO image folder. All ```ann_file``` and ```gt_path``` vars should also be updated to the location of your desired json annotations file.
 
