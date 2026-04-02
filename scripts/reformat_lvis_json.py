@@ -23,7 +23,7 @@ def main():
     #- 76   # bear
     #- 225  # cat
     #- 378  # dog
-    valid_cat_ids = [943 ,1202, 569 ,496  ,422 ,80, 76, 225, 378]
+    valid_cat_ids = [943, 1202, 569, 496, 422, 80, 76, 225, 378]
     with open(INPUT_JSON, "r") as f:
         data = json.load(f)
 
