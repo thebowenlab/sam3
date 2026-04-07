@@ -31,9 +31,11 @@ from sam3.model.model_misc import (
     MultiheadAttentionWrapper as MultiheadAttention,
     TransformerWrapper,
 )
+from sam3.model.densepose import DensePoseHead
 from sam3.model.necks import Sam3DualViTDetNeck
 from sam3.model.position_encoding import PositionEmbeddingSine
 from sam3.model.sam1_task_predictor import SAM3InteractiveImagePredictor
+from sam3.model.sam3_densepose_image import Sam3DensePoseImage
 from sam3.model.sam3_image import Sam3Image, Sam3ImageOnVideoMultiGPU
 from sam3.model.sam3_tracking_predictor import Sam3TrackerPredictor
 from sam3.model.sam3_video_inference import Sam3VideoInferenceWithInstanceInteractivity
@@ -57,6 +59,8 @@ def _setup_tf32() -> None:
 
 _setup_tf32()
 
+def _create_densepose_head():
+    return DensePoseHead()
 
 def _create_position_encoding(precompute_resolution=None):
     """Create position encoding for visual backbone."""
@@ -326,6 +330,50 @@ def _create_sam3_model(
         )
     common_params["matcher"] = matcher
     model = Sam3Image(**common_params)
+
+    return model
+
+
+def _create_sam3_densepose_model(
+    backbone,
+    transformer,
+    input_geometry_encoder,
+    densepose_head,
+    segmentation_head,
+    dot_prod_scoring,
+    inst_interactive_predictor,
+    eval_mode,
+):
+    """Create the SAM3 image model."""
+    common_params = {
+        "backbone": backbone,
+        "transformer": transformer,
+        "input_geometry_encoder": input_geometry_encoder,
+        "densepose_head": densepose_head,
+        "segmentation_head": segmentation_head,
+        "num_feature_levels": 1,
+        "o2m_mask_predict": True,
+        "dot_prod_scoring": dot_prod_scoring,
+        "use_instance_query": False,
+        "multimask_output": True,
+        "inst_interactive_predictor": inst_interactive_predictor,
+    }
+
+    matcher = None
+    if not eval_mode:
+        from sam3.train.matcher import BinaryHungarianMatcherV2
+
+        matcher = BinaryHungarianMatcherV2(
+            focal=True,
+            cost_class=2.0,
+            cost_bbox=5.0,
+            cost_giou=2.0,
+            alpha=0.25,
+            gamma=2,
+            stable=False,
+        )
+    common_params["matcher"] = matcher
+    model = Sam3DensePoseImage(**common_params)
 
     return model
 
@@ -624,6 +672,93 @@ def build_sam3_image_model(
         backbone,
         transformer,
         input_geometry_encoder,
+        segmentation_head,
+        dot_prod_scoring,
+        inst_predictor,
+        eval_mode,
+    )
+    if load_from_HF and checkpoint_path is None:
+        checkpoint_path = download_ckpt_from_hf()
+    # Load checkpoint if provided
+    if checkpoint_path is not None:
+        _load_checkpoint(model, checkpoint_path)
+
+    # Setup device and mode
+    model = _setup_device_and_mode(model, device, eval_mode)
+
+    return model
+
+def build_sam3_densepose_image_model(
+    bpe_path=None,
+    device="cuda" if torch.cuda.is_available() else "cpu",
+    eval_mode=True,
+    checkpoint_path=None,
+    load_from_HF=True,
+    enable_segmentation=True,
+    enable_inst_interactivity=False,
+    compile=False,
+):
+    """
+    Build SAM3 image model with a densepose head
+
+    Args:
+        bpe_path: Path to the BPE tokenizer vocabulary
+        device: Device to load the model on ('cuda' or 'cpu')
+        eval_mode: Whether to set the model to evaluation mode
+        checkpoint_path: Optional path to model checkpoint
+        enable_segmentation: Whether to enable segmentation head
+        enable_inst_interactivity: Whether to enable instance interactivity (SAM 1 task)
+        compile_mode: To enable compilation, set to "default"
+
+    Returns:
+        A SAM3 image model
+    """
+    if bpe_path is None:
+        bpe_path = pkg_resources.resource_filename(
+            "sam3", "assets/bpe_simple_vocab_16e6.txt.gz"
+        )
+
+    # Create visual components
+    compile_mode = "default" if compile else None
+    vision_encoder = _create_vision_backbone(
+        compile_mode=compile_mode, enable_inst_interactivity=enable_inst_interactivity
+    )
+
+    # Create text components
+    text_encoder = _create_text_encoder(bpe_path)
+
+    # Create visual-language backbone
+    backbone = _create_vl_backbone(vision_encoder, text_encoder)
+
+    # Create transformer components
+    transformer = _create_sam3_transformer()
+
+    # Create dot product scoring
+    dot_prod_scoring = _create_dot_product_scoring()
+
+    # Create segmentation head if enabled
+    segmentation_head = (
+        _create_segmentation_head(compile_mode=compile_mode)
+        if enable_segmentation
+        else None
+    )
+
+    # Create densepose head
+    densepose_head = _create_densepose_head()
+
+    # Create geometry encoder
+    input_geometry_encoder = _create_geometry_encoder()
+    if enable_inst_interactivity:
+        sam3_pvs_base = build_tracker(apply_temporal_disambiguation=False)
+        inst_predictor = SAM3InteractiveImagePredictor(sam3_pvs_base)
+    else:
+        inst_predictor = None
+    # Create the SAM3 model
+    model = _create_sam3_densepose_model(
+        backbone,
+        transformer,
+        input_geometry_encoder,
+        densepose_head,
         segmentation_head,
         dot_prod_scoring,
         inst_predictor,
