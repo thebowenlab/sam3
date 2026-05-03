@@ -121,6 +121,20 @@ class BatchedFindTarget:
     object_ids_padded: MyTensor
     object_ids_padded__type = torch.long
 
+    # Target densepose info
+    dp_vertices: Optional[List]
+    dp_vertices__type = torch.int
+    dp_xs: Optional[List]
+    dp_xs__type = torch.float
+    dp_ys: Optional[List]
+    dp_ys__type = torch.float
+    ref_model: Optional[List]
+    ref_model__type = str
+    img_ids: Optional[List]
+    img_ids__type = torch.int
+
+
+
 
 @dataclass
 class BatchedInferenceMetadata:

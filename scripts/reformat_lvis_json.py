@@ -3,7 +3,7 @@ import os
 
 # Input / output paths
 INPUT_JSON = "/home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1.json"
-OUTPUT_JSON = "/home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1_filtered.json"
+OUTPUT_JSON = "/home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1_filtered_has_cse.json"
 
 
 def get_filename_from_id(image_id):
@@ -24,6 +24,7 @@ def main():
     #- 225  # cat
     #- 378  # dog
     valid_cat_ids = [943, 1202, 569, 496, 422, 80, 76, 225, 378]
+
     with open(INPUT_JSON, "r") as f:
         data = json.load(f)
 
@@ -49,11 +50,13 @@ def main():
         if cat['id'] in valid_cat_ids
     ]
     
-    # Keep annotations of a valid category
+    # Keep annotations of a valid category that have densepose annotations
     filtered_annotations = [
         ann for ann in data['annotations']
-        if ann['category_id'] in valid_cat_ids
+        if ann['category_id'] in valid_cat_ids and "dp_vertex" in ann
     ]
+
+
     
     # Get image IDs that still have annotations
     keep_image_ids = {ann['image_id'] for ann in filtered_annotations}

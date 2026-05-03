@@ -340,6 +340,7 @@ def _create_sam3_densepose_model(
     input_geometry_encoder,
     densepose_head,
     segmentation_head,
+    cse_embedder,
     dot_prod_scoring,
     inst_interactive_predictor,
     eval_mode,
@@ -351,6 +352,7 @@ def _create_sam3_densepose_model(
         "input_geometry_encoder": input_geometry_encoder,
         "densepose_head": densepose_head,
         "segmentation_head": segmentation_head,
+        "cse_embedder": cse_embedder,
         "num_feature_levels": 1,
         "o2m_mask_predict": True,
         "dot_prod_scoring": dot_prod_scoring,
@@ -374,6 +376,10 @@ def _create_sam3_densepose_model(
         )
     common_params["matcher"] = matcher
     model = Sam3DensePoseImage(**common_params)
+    for name, param in model.named_parameters():
+        if not name.startswith("densepose_head") and not name.startswith("cse_embedder"):
+        # if not name.startswith("densepose_head") and not name.startswith("cse_embedder") and not name.startswith("segmentation_head.pixel_decoder"):
+            param.requires_grad = False
 
     return model
 
@@ -697,9 +703,11 @@ def build_sam3_densepose_image_model(
     enable_segmentation=True,
     enable_inst_interactivity=False,
     compile=False,
+    cse_embedder=None
 ):
     """
-    Build SAM3 image model with a densepose head
+    Build SAM3 image model with a 
+     head
 
     Args:
         bpe_path: Path to the BPE tokenizer vocabulary
@@ -760,6 +768,7 @@ def build_sam3_densepose_image_model(
         input_geometry_encoder,
         densepose_head,
         segmentation_head,
+        cse_embedder,
         dot_prod_scoring,
         inst_predictor,
         eval_mode,

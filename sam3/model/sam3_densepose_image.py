@@ -27,6 +27,7 @@ class Sam3DensePoseImage(Sam3Image):
         input_geometry_encoder,
         densepose_head,
         segmentation_head=None,
+        cse_embedder=None,
         num_feature_levels=1,
         o2m_mask_predict=True,
         dot_prod_scoring=None,
@@ -63,9 +64,17 @@ class Sam3DensePoseImage(Sam3Image):
             inst_interactive_predictor,
             **kwargs)
         self.densepose_head = densepose_head
+        self.cse_embedder = cse_embedder
 
     def _run_densepose_head(self, out, backbone_out):
-        print("Run Densepose head")
+ 
+        densepose_head_outputs, densepose_head_outputs_o2m = activation_ckpt_wrapper(self.densepose_head)(
+                out=out,
+                backbone_out=backbone_out,
+            )
+        out["pred_embeddings"] = densepose_head_outputs
+        out["pred_embeddings_o2m"] = densepose_head_outputs_o2m
+
 
     def forward_grounding(
         self,
@@ -74,12 +83,12 @@ class Sam3DensePoseImage(Sam3Image):
         find_target,
         geometric_prompt: Prompt,
     ):
-        with torch.profiler.record_function("SAM3Image._encode_prompt"):
+        with torch.profiler.record_function("SAM3DensePoseImage._encode_prompt"):
             prompt, prompt_mask, backbone_out = self._encode_prompt(
                 backbone_out, find_input, geometric_prompt
             )
         # Run the encoder
-        with torch.profiler.record_function("SAM3Image._run_encoder"):
+        with torch.profiler.record_function("SAM3DensePoseImage._run_encoder"):
             backbone_out, encoder_out, _ = self._run_encoder(
                 backbone_out, find_input, prompt, prompt_mask
             )
@@ -92,7 +101,7 @@ class Sam3DensePoseImage(Sam3Image):
         }
 
         # Run the decoder
-        with torch.profiler.record_function("SAM3Image._run_decoder"):
+        with torch.profiler.record_function("SAM3DensePoseImage._run_decoder"):
             out, hs = self._run_decoder(
                 memory=out["encoder_hidden_states"],
                 pos_embed=encoder_out["pos_embed"],
@@ -104,7 +113,7 @@ class Sam3DensePoseImage(Sam3Image):
             )
 
         # Run segmentation heads
-        with torch.profiler.record_function("SAM3Image._run_segmentation_heads"):
+        with torch.profiler.record_function("SAM3DensePoseImage._run_segmentation_heads"):
             self._run_segmentation_heads(
                 out=out,
                 backbone_out=backbone_out,
@@ -116,25 +125,49 @@ class Sam3DensePoseImage(Sam3Image):
                 hs=hs,
             )
 
-        # Run segmentation heads
-        with torch.profiler.record_function("SAM3Image._run_densepose_head"):
+        if self.training or self.num_interactive_steps_val > 0:
+            self._compute_matching(out, self.back_convert(find_target))
+
+
+        # Run densepose head
+        with torch.profiler.record_function("SAM3DensePoseImage._run_densepose_head"):
             self._run_densepose_head(
                 out=out,
                 backbone_out=backbone_out,
             )
 
-        if self.training or self.num_interactive_steps_val > 0:
-            self._compute_matching(out, self.back_convert(find_target))
-
 
 
         return out
 
+    def back_convert(self, targets):
+        batched_targets = {
+            "boxes": targets.boxes.view(-1, 4),
+            "boxes_xyxy": box_cxcywh_to_xyxy(targets.boxes.view(-1, 4)),
+            "boxes_padded": targets.boxes_padded,
+            "positive_map": targets.boxes.new_ones(len(targets.boxes), 1),
+            "num_boxes": targets.num_boxes,
+            "masks": targets.segments,
+            "semantic_masks": targets.semantic_segments,
+            "is_valid_mask": targets.is_valid_segment,
+            "is_exhaustive": targets.is_exhaustive,
+            "object_ids_packed": targets.object_ids,
+            "object_ids_padded": targets.object_ids_padded,
+            "dp_vertex": targets.dp_vertices,
+            "dp_x": targets.dp_xs,
+            "dp_y": targets.dp_ys,
+            "ref_model": targets.ref_model,
+            "img_id": targets.img_ids,
+        }
+        return batched_targets
+
 
     def forward(self, input: BatchedDatapoint):
+        
         device = self.device
         backbone_out = {"img_batch_all_stages": input.img_batch}
         backbone_out.update(self.backbone.forward_image(input.img_batch))
+
         num_frames = len(input.find_inputs)
         assert num_frames == 1
 
@@ -174,7 +207,13 @@ class Sam3DensePoseImage(Sam3Image):
                 find_target=find_target,
                 geometric_prompt=geometric_prompt.clone(),
             )
+            out_ref_model = {} # dict of mesh name -> mesh embeddings
+            for ref_model in find_target.ref_model:  # get embeddings for each mesh in this batch
+                if ref_model is not None:
+                    out_ref_model[ref_model] = self.cse_embedder(ref_model)
+            out["mesh_embeddings"] = out_ref_model
             stage_outs.append(out)
+
 
         previous_stages_out.append(stage_outs)
         return previous_stages_out

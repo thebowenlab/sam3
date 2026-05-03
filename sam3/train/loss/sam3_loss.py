@@ -107,6 +107,8 @@ class Sam3LossWrapper(torch.nn.Module):
                 o2m_out = {
                     k[: -len("_o2m")]: v for k, v in out.items() if k.endswith("_o2m")
                 }
+                if not is_aux and "mesh_embeddings" in out.keys():
+                    o2m_out["mesh_embeddings"] = out["mesh_embeddings"]
                 # o2m targets are the same as the o2o targets (assuming repeat=1)
                 o2m_targets = targets
                 if self.use_o2m_matcher_on_o2m_aux or not is_aux:

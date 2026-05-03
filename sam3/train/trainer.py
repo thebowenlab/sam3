@@ -49,6 +49,7 @@ from sam3.train.utils.train_utils import (
     set_seeds,
     setup_distributed_backend,
 )
+import sam3.train.data.builtin
 
 
 CORE_LOSS_KEY = "core_loss"
@@ -537,6 +538,7 @@ class Trainer:
                 meter.update(
                     find_stages=find_stages,
                     find_metadatas=batch.find_metadatas,
+                    find_targets=find_targets,
                     model=model,
                     batch=batch,
                     key=key,

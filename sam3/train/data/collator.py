@@ -176,6 +176,11 @@ def collate_fn_api(
             repeated_boxes=[],
             object_ids=[],
             object_ids_padded=[],
+            dp_vertices=[],
+            dp_xs=[],
+            dp_ys=[],
+            ref_model=[],
+            img_ids=[],
         )
         for _ in range(num_stages)
     ]
@@ -271,6 +276,33 @@ def collate_fn_api(
                 current_out_object_ids.append(object_id)
             find_targets[stage_id].boxes.extend(current_out_boxes)
             find_targets[stage_id].object_ids.extend(current_out_object_ids)
+
+            current_dp_vertices = []
+            current_dp_xs = []
+            current_dp_ys = []
+            current_ref_model = []
+            current_img_ids = []
+            for object_id in q.object_ids_output:
+                current_dp_vertices.append(
+                    data.images[q.image_id].objects[object_id].dp_vertex
+                )
+                current_dp_xs.append(
+                    data.images[q.image_id].objects[object_id].dp_x
+                )
+                current_dp_ys.append(
+                    data.images[q.image_id].objects[object_id].dp_y
+                )
+                current_ref_model.append(
+                    data.images[q.image_id].objects[object_id].ref_model)
+                current_img_ids.append(
+                    data.images[q.image_id].objects[object_id].img_id)
+            find_targets[stage_id].dp_vertices.extend(current_dp_vertices)
+            find_targets[stage_id].dp_xs.extend(current_dp_xs)
+            find_targets[stage_id].dp_ys.extend(current_dp_ys)
+            find_targets[stage_id].ref_model.extend(current_ref_model)
+            find_targets[stage_id].img_ids.extend(current_img_ids)
+
+
             if repeats > 0:
                 for _ in range(repeats):
                     find_targets[stage_id].repeated_boxes.extend(current_out_boxes)

@@ -13,6 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from iopath.common.file_io import PathManager
 
 import torch
 import torch.utils.data
@@ -111,6 +112,16 @@ class Object:
     is_crowd: bool = False
 
     source: Optional[str] = None
+
+    dp_vertex: Optional[List] = None
+
+    dp_x: Optional[torch.Tensor] = None
+
+    dp_y: Optional[torch.Tensor] = None
+
+    ref_model: Optional[str] = None
+
+    img_id: Optional[int] = None
 
 
 @dataclass
@@ -308,6 +319,11 @@ class CustomCocoDetectionAPI(VisionDataset):
                         annotation["is_crowd"] if "is_crowd" in annotation else None
                     ),
                     source=annotation["source"] if "source" in annotation else "",
+                    dp_vertex=annotation["dp_vertex"] if "dp_vertex" in annotation else None,
+                    dp_x=annotation["dp_x"] if "dp_x" in annotation else None,
+                    dp_y=annotation["dp_y"] if "dp_y" in annotation else None,
+                    ref_model=annotation["ref_model"] if "ref_model" in annotation else None,
+                    img_id=annotation["orig_img_id"],
                 )
             )
             id2index_obj[annotation["id"]] = len(images[image_id].objects) - 1
