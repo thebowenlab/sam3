@@ -36,6 +36,18 @@ def get_vertex_colors_from_embeddings(
     Map vertex embeddings [K, D] -> RGB colors [K, 3] via PCA.
     Returns: [K, 3] tensor of floats in [0, 1].
     """
+
+    if mesh_name == "smpl_27554":
+        embed_map, _ = np.load("/home/camposadmin/Documents/lvis/mds_d=256.npy", allow_pickle=True)
+        embed_map = torch.tensor(embed_map).float()[:, 0]
+        embed_map -= embed_map.min()
+        embed_map /= embed_map.max()
+        colors = torch.zeros(embed_map.shape[0], 3)
+        colors[:,0] += embed_map
+        colors[:,1] += embed_map
+        colors[:,2] += embed_map
+        return colors.to(dtype=torch.float32, device=device)
+
     mean = embeddings.mean(dim=0, keepdim=True)
     centered = embeddings - mean
 
@@ -94,11 +106,11 @@ def visualize_instance(
     # embedding = pred_embedding / torch.clamp(pred_embedding.norm(p=None, dim=0, keepdim=True), min=1e-6)
     # pred_embedding = embedding
 
-    print(pred_embedding[:, 0, 0])
-    print(mesh_vertex_embs[0])
+    # print(pred_embedding[:, 0, 0])
+    # print(mesh_vertex_embs[0])
 
     img_h, img_w = image_bgr.shape[:2]
-    print(x,y,w,h)
+    # print(x,y,w,h)
 
     # Resize embedding to bbox size: [D, S, S] -> [D, h, w]
     embedding_bbox = F.interpolate(
@@ -109,15 +121,19 @@ def visualize_instance(
     # Crop mask to bbox region
     x0, y0 = max(x, 0), max(y, 0)
     x1, y1 = min(x + w, img_w), min(y + h, img_h)
+    ex0, ey0 = x0 - x, y0 - y
+    ex1, ey1 = x1 - x, y1 - y
     mask_crop = pred_mask[y0:y1, x0:x1]
 
-    mask_bbox = torch.zeros(h, w, dtype=torch.bool, device=device)
-    ex0, ey0 = x0 - x, y0 - y
-    mask_bbox[ey0:ey0 + mask_crop.shape[0], ex0:ex0 + mask_crop.shape[1]] = mask_crop.to(device)
+    new_h, new_w = y1-y0, x1-x0
+    mask_bbox = torch.zeros(new_h, new_w, dtype=torch.bool, device=device)
+    
+    mask_bbox = mask_crop.to(device)
 
     if not mask_bbox.any():
         return image_bgr
 
+    embedding_bbox = embedding_bbox[:, ey0:ey1, ex0:ex1]
     # Find closest mesh vertex for each foreground pixel
     fg_embs = embedding_bbox[:, mask_bbox].t()  # [J, D]
 
@@ -126,14 +142,13 @@ def visualize_instance(
     for i in range(0, len(fg_embs), chunk_size):
         chunk = fg_embs[i:i + chunk_size]
         edm = squared_euclidean_distance_matrix(chunk, mesh_vertex_embs)
-        print(edm[0][0]-edm[0][1])
         closest_list.append(edm.argmin(dim=1))
     closest_verts = torch.cat(closest_list)  # [J]
     print(closest_verts)
 
 
     # Map to PCA colors
-    color_map = torch.zeros(h, w, 3, device=device)
+    color_map = torch.zeros(new_h, new_w, 3, device=device)
     color_map[mask_bbox] = vertex_colors[closest_verts]
 
     rgb_uint8 = (color_map.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
@@ -143,10 +158,10 @@ def visualize_instance(
     mask_np = mask_bbox.cpu().numpy()
     mask_3ch = np.stack([mask_np] * 3, axis=-1)
 
-    roi = image_bgr[y:y + h, x:x + w].astype(np.float32)
+    roi = image_bgr[y0:y1, x0:x1].astype(np.float32)
     blended = roi * (1.0 - alpha) + colored_bgr.astype(np.float32) * alpha
     roi[mask_3ch] = blended[mask_3ch]
-    image_bgr[y:y + h, x:x + w] = roi.astype(np.uint8)
+    image_bgr[y0:y1, x0:x1] = roi.astype(np.uint8)
 
     return image_bgr
 
@@ -238,7 +253,7 @@ def main():
 
         # Sort by score descending so high-confidence instances render on top
         preds = sorted(preds, key=lambda p: p.get("score", 0.0))
-
+        print("img id: ", img_id, ", number of predictions: ", len(preds))
         for pred in preds:
 
             pred_embedding = pred["embedding"]  # [D, S, S]

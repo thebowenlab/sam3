@@ -248,6 +248,7 @@ def squared_euclidean_distance_matrix(
     edm += (pts1 * pts1).sum(1, keepdim=True) + (pts2 * pts2).sum(
         1, keepdim=True
     ).t()
+    edm = edm.clamp(min=0.0)
     return edm.contiguous()
 
 
@@ -312,7 +313,7 @@ class CSESoftEmbeddingLoss(LossWithWeights):
         LossWithWeights interface (receives outputs, targets, indices, num_boxes).
         """
         pred_embeddings = outputs["pred_embeddings"]  # [N, D, S, S]
-        print(pred_embeddings.norm(dim=1).mean())
+        # print(pred_embeddings.norm(dim=1).mean())
         # print(indices)
         h, w = pred_embeddings.shape[2:]
         numQ = outputs["pred_boxes"].shape[1]
@@ -328,6 +329,7 @@ class CSESoftEmbeddingLoss(LossWithWeights):
 
         total_loss = pred_embeddings.sum()*0
         num_matches = indices[1].shape[0]
+        num_contributing_points = 0
 
         for match_num in range(num_matches):
             mesh_name = ref_model[match_num]
@@ -339,6 +341,7 @@ class CSESoftEmbeddingLoss(LossWithWeights):
 
             mesh = create_mesh(mesh_name, mesh_vertex_embeddings.device)
             dp_vertices = torch.tensor(dp_vertex[match_num], device = pred_embeddings.device)
+            # print(match_num, pred_boxes[match_num], target_boxes[match_num], dp_x[match_num], dp_y[match_num])
 
             interpolator = BilinearInterpolationHelper.from_matches(
                 pred_boxes[match_num].unsqueeze(0),
@@ -348,6 +351,7 @@ class CSESoftEmbeddingLoss(LossWithWeights):
                 (h, w),
             )
             j_valid = interpolator.j_valid
+
 
             if torch.sum(j_valid) == 0: # no valid points shouldn't contribute to loss
                 total_loss += dummy_loss(pred_embeddings, mesh_vertex_embeddings)
@@ -363,7 +367,7 @@ class CSESoftEmbeddingLoss(LossWithWeights):
                     w_yhi_xhi=interpolator.w_yhi_xhi[:, None],  # pyre-ignore[16]
                 )[j_valid, :]
             )
-            # print(dp_vertices)
+            # print(vertex_embeddings_i.shape)
 
             geodist_softmax_values = F.softmax(
                 mesh.geodists[dp_vertices[j_valid]] / (-self.geodist_gauss_sigma), dim=1
@@ -378,6 +382,18 @@ class CSESoftEmbeddingLoss(LossWithWeights):
                 dim=1,
             )
 
-            total_loss += (-geodist_softmax_values * embdist_logsoftmax_values).sum(1).mean()
 
+            dists = squared_euclidean_distance_matrix(vertex_embeddings_i, mesh_vertex_embeddings)
+            print("dist range:", dists.min().item(), dists.max().item(), dists.mean().item())
+            dists = squared_euclidean_distance_matrix(vertex_embeddings_i, vertex_embeddings_i)
+            print("distself range:", dists.min().item(), dists.max().item(), dists.mean().item())
+            dists = squared_euclidean_distance_matrix(mesh_vertex_embeddings, mesh_vertex_embeddings)
+            print("meshdist range:", dists.min().item(), dists.max().item(), dists.mean().item())
+
+            num_contributing_points += j_valid.sum()
+            # total_loss += (-geodist_softmax_values * embdist_logsoftmax_values).sum(1).mean()
+            total_loss += (-geodist_softmax_values * embdist_logsoftmax_values).sum()
+        # print(total_loss)
+        if num_contributing_points > 0:
+            total_loss /= num_contributing_points
         return {"loss_cse_embed": total_loss}

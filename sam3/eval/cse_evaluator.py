@@ -111,10 +111,12 @@ class PerPointGPSEvaluator:
         dw, dh = max(int(w), 1), max(int(h), 1)
         img_h, img_w = pred_mask.shape
 
-        gt_bbox_xywh[0] *= img_w
-        gt_bbox_xywh[2] *= img_w
-        gt_bbox_xywh[1] *= img_h
-        gt_bbox_xywh[3] *= img_h
+        gt_abs_bbox_xywh = gt_bbox_xywh.clone()
+
+        gt_abs_bbox_xywh[0] *= img_w
+        gt_abs_bbox_xywh[2] *= img_w
+        gt_abs_bbox_xywh[1] *= img_h
+        gt_abs_bbox_xywh[3] *= img_h
 
         # Resize embedding to bbox pixel size: [D, S, S] -> [D, dh, dw]
         embedding_bbox = F.interpolate(
@@ -127,15 +129,16 @@ class PerPointGPSEvaluator:
         # GT point coords: convert to bbox-relative pixel coords
         dy = int(pred_bbox_xywh[3])
         dx = int(pred_bbox_xywh[2])
-        dp_x = gt_points_x * gt_bbox_xywh[2] / 255.0
-        dp_y = gt_points_y * gt_bbox_xywh[3] / 255.0
-        abs_px = (dp_x + gt_bbox_xywh[0]).to(torch.int)
-        abs_py = (dp_y + gt_bbox_xywh[1]).to(torch.int)
+        dp_x = gt_points_x * gt_abs_bbox_xywh[2] / 255.0
+        dp_y = gt_points_y * gt_abs_bbox_xywh[3] / 255.0
+        abs_px = (dp_x + gt_abs_bbox_xywh[0]).to(torch.int)
+        abs_py = (dp_y + gt_abs_bbox_xywh[1]).to(torch.int)
         py = (abs_py - pred_bbox_xywh[1]).to(torch.int)
         px = (abs_px - pred_bbox_xywh[0]).to(torch.int)
 
+
         # Validity: points inside the bbox
-        valid = (px >= 0) & (px < dw) & (py >= 0) & (py < dh)
+        valid = (px >= 0) & (px < dw) & (py >= 0) & (py < dh) & (abs_py >=0) & (abs_py < img_h) & (abs_px >=0) & (abs_px < img_w)
         if not valid.any():
             return 0.0
 
@@ -255,7 +258,6 @@ class PerPointGPSEvaluator:
                             gt_bbox_xywh=gt["bbox"],
                             mesh_embedding=mesh_embeddings[gt["mesh_name"]],
                         )
-
                 # Greedy matching per detection (sorted by score desc)
                 gt_matched = [False] * len(gts)
                 for i, dt in enumerate(dts):
@@ -271,6 +273,7 @@ class PerPointGPSEvaluator:
                         if self.out_dir is not None:
                             matched_preds.append(dt)
                         gt_matched[best_j] = True
+                        # print("Matched_GPS:", best_ogps)
                     all_scores.append(dt["score"])
                     all_ogps.append(best_ogps)
 

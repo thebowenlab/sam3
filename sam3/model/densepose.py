@@ -3,6 +3,7 @@ import math
 from functools import partial
 from typing import Callable, List, Optional, Tuple, Union, Dict
 from dataclasses import dataclass
+from sam3.model.maskformer_segmentation import PixelDecoder
 
 
 import torch
@@ -146,7 +147,8 @@ class DensePoseHead(nn.Module):
         dp_pooler_type = "ROIAlignV2",
         dp_head_conv_dim = 512,
         dp_embed_dim = 16,
-        dp_deconv_kernel = 4):
+        dp_deconv_kernel = 4,
+        ):
         super().__init__()
         self.bb_channels = bb_channels
         self.bb_scales = bb_scales
@@ -158,10 +160,13 @@ class DensePoseHead(nn.Module):
         self.dp_deconv_kernel = dp_deconv_kernel
         self._init_densepose_head()
 
-    def _init_densepose_head(self):
-        # self.densepose_data_filter = build_densepose_data_filter(cfg)
-       
+    def _init_densepose_head(self):       
 
+        self.decoder = pixel_decoder = PixelDecoder(
+            num_upsampling_stages=3,
+            interpolation_mode="bilinear",
+            hidden_dim=self.bb_channels,
+        )
 
         self.densepose_pooler = ROIPooler(
             output_size=self.dp_pooler_resolution,
@@ -174,9 +179,15 @@ class DensePoseHead(nn.Module):
         self.embed_lowres = torch.nn.ConvTranspose2d(
             self.dp_head_conv_dim, self.dp_embed_dim, self.dp_deconv_kernel, stride=2, padding=int(self.dp_deconv_kernel / 2 - 1)
         )
+        nn.init.kaiming_normal_(self.embed_lowres.weight, mode="fan_out", nonlinearity="relu")
+        nn.init.constant_(self.embed_lowres.bias, 0)
 
-        # self.densepose_losses = build_densepose_losses(cfg)
-        # self.embedder = build_densepose_embedder(cfg)
+        # To try and get rid of checkerboard artifacts
+        # self.conv1 = torch.nn.Conv2d(self.dp_head_conv_dim, self.dp_head_conv_dim, 3, 1, 1)
+        # self.conv2 = torch.nn.Conv2d(self.dp_head_conv_dim, self.dp_embed_dim, 3, 1, 1)
+        # nn.init.uniform_(self.conv1.weight, a=0, b=1)
+        # nn.init.uniform_(self.conv2.weight, a=-1, b=1)
+
 
 
     def compute_densepose_outputs(self, features_list, output_boxes_xyxy):
@@ -185,15 +196,44 @@ class DensePoseHead(nn.Module):
         if len(features_dp) > 0:
             densepose_head_outputs = self.densepose_head(features_dp)
             densepose_predictor_outputs = self.embed_lowres(densepose_head_outputs)
+
+            # only if we use convs instead of transposed conv
+            # densepose_predictor_outputs = self.conv1(densepose_head_outputs)
+            # densepose_predictor_outputs = F.relu(densepose_predictor_outputs)
+            # densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
+            # densepose_predictor_outputs = self.conv2(densepose_head_outputs)
+
             densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
         else:
             densepose_predictor_outputs = None
         return densepose_predictor_outputs
 
 
-    def forward(self, out, backbone_out):
+    def forward(self, out, backbone_out, image_ids, encoder_hidden_states):
+        backbone_feats = backbone_out["backbone_fpn"]
+        # if backbone_feats[0].shape[0] > 1:
+        #         # For bs > 1, we construct the per query backbone features
+        #         backbone_visual_feats = []
+        #         for feat in backbone_feats:
+        #             # Copy the img features per query (pixel decoder won't share img feats)
+        #             backbone_visual_feats.append(feat[image_ids, ...].to(backbone_feats[0].device))
+        # else:
+        #     # Bs=1, we rely on broadcasting for query-based processing
+        #     backbone_visual_feats = [bb_feat.clone() for bb_feat in backbone_feats]
+        # # Extract visual embeddings
+        # encoder_hidden_states = encoder_hidden_states.permute(1, 2, 0)
+        # spatial_dim = math.prod(backbone_feats[-1].shape[-2:])
+        # encoder_visual_embed = encoder_hidden_states[..., :spatial_dim].reshape(
+        #     -1, *backbone_feats[-1].shape[1:]
+        # )
 
-        features_list = [out["pixel_embed"]]
+        # backbone_visual_feats[-1] = encoder_visual_embed
+        # pixel_embed = self.decoder(backbone_visual_feats)
+
+        backbone_feats = [x for x in backbone_feats]
+        pixel_embed = self.decoder(backbone_feats)
+
+        features_list = [pixel_embed]
 
         densepose_predictor_outputs = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy"])
         densepose_predictor_outputs_o2m = None

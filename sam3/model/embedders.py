@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Set
 import torch
 import torch.nn as nn
 import os
+import numpy as np
 import logging
 from iopath.common.file_io import PathManager as PathManagerBase
 import pickle
@@ -93,6 +94,8 @@ class VertexFeatureEmbedder(nn.Module):
         self.features.zero_()
         self.embeddings.zero_()
 
+        # nn.init.orthogonal_(self.embeddings)
+
     def forward(self) -> torch.Tensor:
         """
         Produce vertex embeddings, a tensor of shape [N, D] where:
@@ -130,7 +133,7 @@ class Embedder(nn.Module):
 
     DEFAULT_MODEL_CHECKPOINT_PREFIX = "roi_heads.embedder."
 
-    def __init__(self, embed_dim, mesh_specs):
+    def __init__(self, embed_dim, mesh_specs, weight_dict_file=None):
         """
         Initialize mesh embedders. An embedder for mesh `i` is stored in a submodule
         "embedder_{i}".
@@ -145,8 +148,8 @@ class Embedder(nn.Module):
             logger.info(f"Adding embedder embedder_{mesh_name} with spec {embedder_spec}")
             self.add_module(f"embedder_{mesh_name}", create_embedder(embedder_spec, embed_dim))
             self.mesh_names.add(mesh_name)
-        # if cfg.MODEL.WEIGHTS != "":
-        #     self.load_from_model_checkpoint(cfg.MODEL.WEIGHTS)
+        if weight_dict_file != None:
+            self.load_from_model_checkpoint(weight_dict_file)
 
     def load_from_model_checkpoint(self, fpath: str, prefix: Optional[str] = None):
         if prefix is None:
@@ -162,6 +165,7 @@ class Embedder(nn.Module):
             state_dict_local = {}
             for key in state_dict["model"]:
                 if key.startswith(prefix):
+                    print(key)
                     v_key = state_dict["model"][key]
                     if isinstance(v_key, np.ndarray):
                         v_key = torch.from_numpy(v_key)

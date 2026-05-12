@@ -108,7 +108,7 @@ lvis_train:
   loss:
     _target_: sam3.train.loss.sam3_loss.Sam3LossWrapper
     matcher: ${scratch.matcher}
-    o2m_weight: 2.0
+    o2m_weight: 0.25
     o2m_matcher:
       _target_: sam3.train.matcher.BinaryOneToManyMatcher
       alpha: 0.3
@@ -116,47 +116,48 @@ lvis_train:
       topk: 4
     use_o2m_matcher_on_o2m_aux: false
     loss_fns_find:
-      # - _target_: sam3.train.loss.loss_fns.Boxes
-      #   weight_dict:
-      #     loss_bbox: 5.0
-      #     loss_giou: 2.0
-      # - _target_: sam3.train.loss.loss_fns.IABCEMdetr
-      #   weak_loss: False
-      #   weight_dict:
-      #     loss_ce: 20.0 # Another option is 100.0
-      #     presence_loss: 20.0
-      #   pos_weight: 10.0 # Another option is 5.0
-      #   alpha: 0.25
-      #   gamma: 2
-      #   use_presence: True  # Change
-      #   pos_focal: false
-      #   pad_n_queries: 200
-      #   pad_scale_pos: 1.0
-      # - _target_: sam3.train.loss.loss_fns.Masks
-      #   focal_alpha: 0.25
-      #   focal_gamma: 2.0
-      #   weight_dict:
-      #     loss_mask: 200.0
-      #     loss_dice: 10.0
-      #   compute_aux: false
+      - _target_: sam3.train.loss.loss_fns.Boxes
+        weight_dict:
+          loss_bbox: .50
+          loss_giou: .20
+      - _target_: sam3.train.loss.loss_fns.IABCEMdetr
+        weak_loss: False
+        weight_dict:
+          loss_ce: 2.0 # Another option is 100.0
+          presence_loss: 2.0
+        pos_weight: 5.0 # Another option is 5.0
+        alpha: 0.25
+        gamma: 2
+        presence_gamma: 2
+        use_presence: True  # Change
+        pos_focal: false
+        pad_n_queries: 200
+        pad_scale_pos: 1.0
+      - _target_: sam3.train.loss.loss_fns.Masks
+        focal_alpha: 0.25
+        focal_gamma: 2.0
+        weight_dict:
+          loss_mask: 200.0
+          loss_dice: 10.0
+        compute_aux: false
       - _target_: sam3.train.loss.cse_soft_embed_loss.CSESoftEmbeddingLoss
         weight_dict:
           loss_cse_embed: 1.0     # tune this weight
         compute_aux: false
         embdist_gauss_sigma: 0.01 # temperature for embedding distances
         geodist_gauss_sigma: 0.01 # temperature for geodesic soft targets
-    # loss_fn_semantic_seg:
-    #   _target_: sam3.train.loss.loss_fns.SemanticSegCriterion
-    #   presence_head: True
-    #   presence_loss: False  # Change
-    #   focal: True
-    #   focal_alpha: 0.6
-    #   focal_gamma: 2.0
-    #   downsample: False
-    #   weight_dict:
-    #     loss_semantic_seg: 20.0
-    #     loss_semantic_presence: 1.0
-    #     loss_semantic_dice: 30.0
+    loss_fn_semantic_seg:
+      _target_: sam3.train.loss.loss_fns.SemanticSegCriterion
+      presence_head: True
+      presence_loss: False  # Change
+      focal: True
+      focal_alpha: 0.6
+      focal_gamma: 2.0
+      downsample: False
+      weight_dict:
+        loss_semantic_seg: 20.0
+        loss_semantic_presence: 1.0
+        loss_semantic_dice: 30.0
     scale_by_find_batch_size: ${scratch.scale_by_find_batch_size}
 
 # ============================================================================
@@ -226,7 +227,7 @@ scratch:
   gather_pred_via_filesys: false
 
   # Learning rate and scheduler parameters
-  lr_scale: 0.1
+  lr_scale: .1
   lr_transformer: ${times:8e-4,${scratch.lr_scale}}
   lr_vision_backbone: ${times:2.5e-4,${scratch.lr_scale}}
   lr_language_backbone: ${times:5e-5,${scratch.lr_scale}}
@@ -234,10 +235,10 @@ scratch:
   lr_cse_embedder: .01
 
   lrd_vision_backbone: 0.9
-  wd: 0.1
-  scheduler_timescale: 200
-  scheduler_warmup: 1000
-  scheduler_cooldown: 200
+  wd: 0.0001
+  scheduler_timescale: 20
+  scheduler_warmup: 20
+  scheduler_cooldown: 20
 
   val_batch_size: 1
   collate_fn_val:
@@ -247,12 +248,13 @@ scratch:
     dict_key: lvis
     with_seg_masks: ${scratch.enable_segmentation} # Note: Set this to true if using segmentation masks!
 
-  gradient_accumulation_steps: 1
-  train_batch_size: 5
+  gradient_accumulation_steps: 5
+  train_batch_size: 16
   collate_fn:
-    _target_: sam3.train.data.collator.collate_fn_api
+    _target_: sam3.train.data.collator.collate_fn_api_with_chunking
     _partial_: true
     repeats: ${scratch.hybrid_repeats}
+    num_chunks: 5
     dict_key: all
     with_seg_masks: ${scratch.enable_segmentation} # Note: Set this to true if using segmentation masks!
 
@@ -265,7 +267,7 @@ trainer:
   _target_: sam3.train.trainer.Trainer
   skip_saving_ckpts: False
   empty_gpu_mem_cache_after_eval: True
-  skip_first_val: True
+  skip_first_val: False
   max_epochs: 100
   accelerator: cuda
   seed_value: 123
@@ -297,10 +299,10 @@ trainer:
         max_val_queries: 50000
         training: true
         use_caching: False
-        img_folder: /home/camposadmin/Documents/lvis/combined2017
-        # img_folder: /home/camposadmin/Documents/lvis/train2014
-        ann_file: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_train_v1_filtered_giraffe_has_cse.json
-        # ann_file: /home/camposadmin/Documents/lvis/densepose_train2014_cse.json
+        # img_folder: /home/camposadmin/Documents/lvis/combined2017
+        img_folder: /home/camposadmin/Documents/lvis/train2014
+        # ann_file: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_train_v1_filtered_giraffe_has_cse.json
+        ann_file: /home/camposadmin/Documents/lvis/densepose_train2014_cse.json
 
       shuffle: True
       batch_size: ${scratch.train_batch_size}
@@ -319,10 +321,10 @@ trainer:
           include_negatives: true
           category_chunk_size: 16 # Note: You can increase this based on the memory of your GPU.
           _partial_: true
-        img_folder: /home/camposadmin/Documents/lvis/combined2017
-        # img_folder: /home/camposadmin/Documents/lvis/val2014
-        ann_file: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1_filtered_giraffe_has_cse.json
-        # ann_file: /home/camposadmin/Documents/lvis/densepose_minival2014_cse.json
+        # img_folder: /home/camposadmin/Documents/lvis/combined2017
+        img_folder: /home/camposadmin/Documents/lvis/val2014
+        # ann_file: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1_filtered_giraffe_has_cse.json
+        ann_file: /home/camposadmin/Documents/lvis/densepose_minival2014_cse.json
 
         transforms: ${lvis_train.val_transforms}
         max_ann_per_img: 100000
@@ -346,6 +348,7 @@ trainer:
     cse_embedder:
       _target_: sam3.model.embedders.Embedder
       embed_dim: 16
+      # weight_dict_file: "/home/camposadmin/Documents/lvis/model_final_animals.pkl"
       mesh_specs:
         "cat_7466":
           TYPE: vertex_feature
@@ -431,8 +434,8 @@ trainer:
           maxdets: 100
           pred_file_evaluators:
             - _target_: sam3.eval.coco_eval_offline.CocoEvaluatorOfflineWithPredFileEvaluators
-              gt_path: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1_filtered_giraffe_has_cse.json
-              # gt_path: /home/camposadmin/Documents/lvis/densepose_minival2014_cse.json
+              # gt_path: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1_filtered_giraffe_has_cse.json
+              gt_path: /home/camposadmin/Documents/lvis/densepose_minival2014_cse.json
               tide: False
               iou_type: "segm"
         # Mesh alignment (cross-mesh embedding quality)
@@ -516,8 +519,9 @@ trainer:
             warmup_steps: ${scratch.scheduler_warmup}
             warmup_factor: .1
             steps:
-              - 4000
-              - 200000
+              - 40000
+              - 60000
+              - 80000
             step_ratio: .1
           param_names:
             - 'densepose_head.*'
@@ -525,13 +529,27 @@ trainer:
             _target_: sam3.train.optim.schedulers.WarmupMultiStepParamScheduler
             base_lr: ${scratch.lr_cse_embedder}
             warmup_steps: ${scratch.scheduler_warmup}
-            warmup_factor: .1
+            warmup_factor: .001
             steps:
-              - 4000
-              - 200000
+              - 40000
+              - 60000
+              - 80000
+            # frozen_till: 5
             step_ratio: .1
           param_names:
             - 'cse_embedder.*'
+        # - scheduler:
+        #     _target_: sam3.train.optim.schedulers.WarmupMultiStepParamScheduler
+        #     base_lr: ${scratch.lr_segmentation_head}
+        #     warmup_steps: ${scratch.scheduler_warmup}
+        #     warmup_factor: .1
+        #     steps:
+        #       - 3000
+        #       - 6000
+        #       - 18000
+        #     step_ratio: .1
+        #   param_names:
+        #     - 'segmentation_head.*'
 
       weight_decay:
         - scheduler:
@@ -539,17 +557,12 @@ trainer:
             value: ${scratch.wd}
         - scheduler:
             _target_: fvcore.common.param_scheduler.ConstantParamScheduler
-            value: .0001
+            value: ${scratch.wd}
           param_names:
-            - 'densepose_head.*weight'
+            - 'densepose_head.*weight*'
         - scheduler:
             _target_: fvcore.common.param_scheduler.ConstantParamScheduler
-            value: .0001
-          param_names:
-            - 'densepose_head.*bias'
-        - scheduler:
-            _target_: fvcore.common.param_scheduler.ConstantParamScheduler
-            value: .0001
+            value: ${scratch.wd}
           param_names:
             - 'cse_embedder.*'
         - scheduler:
@@ -557,10 +570,11 @@ trainer:
             value: 0.0
           param_names:
             - 'transformer.*bias*'
-            # - 'segmentation_head.*bias*'
+            - 'segmentation_head.*bias*'
             - 'geometry_encoder.*bias*'
             - 'dot_prod_scoring.*bias*'
             - 'backbone.*bias*'
+            - 'densepose_head.*bias*'
           module_cls_names: ['torch.nn.LayerNorm']
 
   checkpoint:

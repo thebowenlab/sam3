@@ -324,6 +324,8 @@ def construct_optimizer(
     """
     if param_allowlist is None:
         param_allowlist = {name for name, _ in model.named_parameters()}
+    for param in sorted(param_allowlist):
+        print(param)
 
     named_parameters = {
         name: param

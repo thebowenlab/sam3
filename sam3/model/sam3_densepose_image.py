@@ -66,11 +66,13 @@ class Sam3DensePoseImage(Sam3Image):
         self.densepose_head = densepose_head
         self.cse_embedder = cse_embedder
 
-    def _run_densepose_head(self, out, backbone_out):
+    def _run_densepose_head(self, out, backbone_out, img_ids, encoder_hidden_states):
  
         densepose_head_outputs, densepose_head_outputs_o2m = activation_ckpt_wrapper(self.densepose_head)(
                 out=out,
                 backbone_out=backbone_out,
+                image_ids=img_ids,
+                encoder_hidden_states=encoder_hidden_states,
             )
         out["pred_embeddings"] = densepose_head_outputs
         out["pred_embeddings_o2m"] = densepose_head_outputs_o2m
@@ -134,6 +136,8 @@ class Sam3DensePoseImage(Sam3Image):
             self._run_densepose_head(
                 out=out,
                 backbone_out=backbone_out,
+                img_ids=find_input.img_ids,
+                encoder_hidden_states=out["encoder_hidden_states"],
             )
 
 

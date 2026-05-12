@@ -176,7 +176,7 @@ class PixelDecoder(nn.Module):
         self,
         hidden_dim,
         num_upsampling_stages,
-        interpolation_mode="nearest",
+        interpolation_mode="bilinear",
         shared_conv=False,
         compile_mode=None,
     ):

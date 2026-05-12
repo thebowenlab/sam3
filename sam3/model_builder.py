@@ -212,7 +212,7 @@ def _create_segmentation_head(compile_mode=None):
     """Create segmentation head with pixel decoder."""
     pixel_decoder = PixelDecoder(
         num_upsampling_stages=3,
-        interpolation_mode="nearest",
+        interpolation_mode="bilinear",
         hidden_dim=256,
         compile_mode=compile_mode,
     )
@@ -376,10 +376,12 @@ def _create_sam3_densepose_model(
         )
     common_params["matcher"] = matcher
     model = Sam3DensePoseImage(**common_params)
-    for name, param in model.named_parameters():
-        if not name.startswith("densepose_head") and not name.startswith("cse_embedder"):
-        # if not name.startswith("densepose_head") and not name.startswith("cse_embedder") and not name.startswith("segmentation_head.pixel_decoder"):
-            param.requires_grad = False
+    
+    # For freezing different parts
+    # for name, param in model.named_parameters():
+        # if name.startswith("backbone") or name.startswith("cse_embedder"):
+        # if not name.startswith("densepose_head"):# and not name.startswith("cse_embedder"):
+            # param.requires_grad = False
 
     return model
 

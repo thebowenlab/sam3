@@ -959,6 +959,11 @@ class Trainer:
                         return
 
                 self.scaler.scale(loss).backward()
+                # for name, param in self.model.named_parameters():
+                #     if param.grad is not None:
+                #         print(f"Layer: {name} | Gradient norm: {param.grad.norm().item()}")
+                #     else:
+                #         print(f"Layer: {name} | No gradient (grad is None)")
                 loss_mts[loss_key].update(loss.item(), batch_size)
                 for extra_loss_key, extra_loss in extra_losses.items():
                     if extra_loss_key not in extra_loss_mts:

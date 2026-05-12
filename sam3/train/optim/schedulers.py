@@ -52,15 +52,19 @@ class WarmupMultiStepParamScheduler:
         warmup_factor: float,
         steps,
         step_ratio: float,
+        frozen_till=-1,
     ):
         self.base_lr = base_lr
         self.warmup_steps = warmup_steps
         self.warmup_factor = warmup_factor
         self.steps = steps
         self.step_ratio = step_ratio
+        self.frozen_till = frozen_till
 
     def __call__(self, step: int, where: float):
         lr = self.base_lr
+        if step < self.frozen_till:
+                return 0
 
         if step < self.warmup_steps:
                 return self.base_lr*step/self.warmup_steps + (1-step/self.warmup_steps)*self.warmup_factor*self.base_lr
