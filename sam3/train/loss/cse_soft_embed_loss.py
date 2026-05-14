@@ -312,6 +312,7 @@ class CSESoftEmbeddingLoss(LossWithWeights):
         This mirrors detectron2's SoftEmbeddingLoss but fits into SAM3's
         LossWithWeights interface (receives outputs, targets, indices, num_boxes).
         """
+
         pred_embeddings = outputs["pred_embeddings"]  # [N, D, S, S]
         # print(pred_embeddings.norm(dim=1).mean())
         # print(indices)
@@ -383,12 +384,12 @@ class CSESoftEmbeddingLoss(LossWithWeights):
             )
 
 
-            dists = squared_euclidean_distance_matrix(vertex_embeddings_i, mesh_vertex_embeddings)
-            print("dist range:", dists.min().item(), dists.max().item(), dists.mean().item())
-            dists = squared_euclidean_distance_matrix(vertex_embeddings_i, vertex_embeddings_i)
-            print("distself range:", dists.min().item(), dists.max().item(), dists.mean().item())
-            dists = squared_euclidean_distance_matrix(mesh_vertex_embeddings, mesh_vertex_embeddings)
-            print("meshdist range:", dists.min().item(), dists.max().item(), dists.mean().item())
+            # dists = squared_euclidean_distance_matrix(vertex_embeddings_i, mesh_vertex_embeddings)
+            # print("dist range:", dists.min().item(), dists.max().item(), dists.mean().item())
+            # dists = squared_euclidean_distance_matrix(vertex_embeddings_i, vertex_embeddings_i)
+            # print("distself range:", dists.min().item(), dists.max().item(), dists.mean().item())
+            # dists = squared_euclidean_distance_matrix(mesh_vertex_embeddings, mesh_vertex_embeddings)
+            # print("meshdist range:", dists.min().item(), dists.max().item(), dists.mean().item())
 
             num_contributing_points += j_valid.sum()
             # total_loss += (-geodist_softmax_values * embdist_logsoftmax_values).sum(1).mean()

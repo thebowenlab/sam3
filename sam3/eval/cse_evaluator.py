@@ -158,6 +158,7 @@ class PerPointGPSEvaluator:
         pixel_embs = pixel_embs.to(mesh_embedding.device)
 
         # Find closest predicted vertices: [J]
+        pixel_embs = normalize_embeddings(pixel_embs)
         pred_vids = find_closest_vertices(pixel_embs, mesh_embedding)
 
         # Mark points outside foreground as invalid

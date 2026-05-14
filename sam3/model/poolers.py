@@ -531,24 +531,25 @@ class ROIPooler(nn.Module):
 
         pooler_fmt_boxes = convert_boxes_to_pooler_format(box_lists)
 
-        if num_level_assignments == 1:
-            return self.level_poolers[0](x[0], pooler_fmt_boxes)
+        assert num_level_assignments == 1
 
-        print("ERROR")
+        # if num_level_assignments == 1:
+        return self.level_poolers[0](x[0], pooler_fmt_boxes)
 
-        level_assignments = assign_boxes_to_levels(
-            box_lists, self.min_level, self.max_level, self.canonical_box_size, self.canonical_level
-        )
 
-        num_channels = x[0].shape[1]
-        output_size = self.output_size[0]
+        # level_assignments = assign_boxes_to_levels(
+        #     box_lists, self.min_level, self.max_level, self.canonical_box_size, self.canonical_level
+        # )
 
-        output = _create_zeros(pooler_fmt_boxes, num_channels, output_size, output_size, x[0])
+        # num_channels = x[0].shape[1]
+        # output_size = self.output_size[0]
 
-        for level, pooler in enumerate(self.level_poolers):
-            inds = nonzero_tuple(level_assignments == level)[0]
-            pooler_fmt_boxes_level = pooler_fmt_boxes[inds]
-            # Use index_put_ instead of advance indexing, to avoid pytorch/issues/49852
-            output.index_put_((inds,), pooler(x[level], pooler_fmt_boxes_level))
+        # output = _create_zeros(pooler_fmt_boxes, num_channels, output_size, output_size, x[0])
+
+        # for level, pooler in enumerate(self.level_poolers):
+        #     inds = nonzero_tuple(level_assignments == level)[0]
+        #     pooler_fmt_boxes_level = pooler_fmt_boxes[inds]
+        #     # Use index_put_ instead of advance indexing, to avoid pytorch/issues/49852
+        #     output.index_put_((inds,), pooler(x[level], pooler_fmt_boxes_level))
 
         return output

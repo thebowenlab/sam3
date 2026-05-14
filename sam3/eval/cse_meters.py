@@ -206,12 +206,16 @@ class CSEPerPointGPSMeter:
         # go batch by batch, add only samples that have smth
         for i in range(len(keep)):
             img_ids = metadata.original_image_id[i]
+            predictions_per_batch = keep.shape[1]
+            embedding_index_start = i*predictions_per_batch
+            batch_embeddings = outputs["pred_embeddings"][embedding_index_start:embedding_index_start+predictions_per_batch]
+            batch_embeddings = batch_embeddings[keep[i]]
             for j in range(len(boxes[i])):
                 self._predictions.append({
                         "image_id": metadata.original_image_id[i].item(),
                         "bbox": boxes[i][j],
                         "score": scores[i][j],
-                        "embedding": outputs["pred_embeddings"][i].cpu(),
+                        "embedding": batch_embeddings[i].cpu(),
                         "mask": out_masks[i][j].squeeze(0),
                         "mesh_name": self.cat_to_mesh[metadata.original_category_id[i].item()],
                     })

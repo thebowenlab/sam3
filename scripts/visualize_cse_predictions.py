@@ -42,11 +42,10 @@ def get_vertex_colors_from_embeddings(
         embed_map = torch.tensor(embed_map).float()[:, 0]
         embed_map -= embed_map.min()
         embed_map /= embed_map.max()
-        colors = torch.zeros(embed_map.shape[0], 3)
-        colors[:,0] += embed_map
-        colors[:,1] += embed_map
-        colors[:,2] += embed_map
-        return colors.to(dtype=torch.float32, device=device)
+        embed_map *= 256
+        color_map = cv2.applyColorMap((embed_map.to(dtype=torch.uint8)).numpy(), cv2.COLORMAP_JET)
+        return torch.tensor(color_map, dtype=torch.float32, device=device).squeeze(1)
+        # return colors.to(dtype=torch.float32, device=device)
 
     mean = embeddings.mean(dim=0, keepdim=True)
     centered = embeddings - mean
