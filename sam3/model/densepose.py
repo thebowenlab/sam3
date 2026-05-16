@@ -201,8 +201,7 @@ class DensePoseHead(nn.Module):
             densepose_predictor_outputs = self.conv1(densepose_head_outputs)
             densepose_predictor_outputs = F.relu(densepose_predictor_outputs)
             densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
-            densepose_predictor_outputs = self.conv2(densepose_head_outputs)
-
+            densepose_predictor_outputs = self.conv2(densepose_predictor_outputs)
             densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
         else:
             densepose_predictor_outputs = None
