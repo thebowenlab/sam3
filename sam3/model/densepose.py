@@ -176,17 +176,17 @@ class DensePoseHead(nn.Module):
         )
         self.densepose_head = DensePoseV1ConvXHead(self.bb_channels)
 
-        # self.embed_lowres = torch.nn.ConvTranspose2d(
-        #     self.dp_head_conv_dim, self.dp_embed_dim, self.dp_deconv_kernel, stride=2, padding=int(self.dp_deconv_kernel / 2 - 1)
-        # )
-        # nn.init.kaiming_normal_(self.embed_lowres.weight, mode="fan_out", nonlinearity="relu")
-        # nn.init.constant_(self.embed_lowres.bias, 0)
+        self.embed_lowres = torch.nn.ConvTranspose2d(
+            self.dp_head_conv_dim, self.dp_embed_dim, self.dp_deconv_kernel, stride=2, padding=int(self.dp_deconv_kernel / 2 - 1)
+        )
+        nn.init.kaiming_normal_(self.embed_lowres.weight, mode="fan_out", nonlinearity="relu")
+        nn.init.constant_(self.embed_lowres.bias, 0)
 
         # To try and get rid of checkerboard artifacts
-        self.conv1 = torch.nn.Conv2d(self.dp_head_conv_dim, self.dp_head_conv_dim, 3, 1, 1)
-        self.conv2 = torch.nn.Conv2d(self.dp_head_conv_dim, self.dp_embed_dim, 3, 1, 1)
-        nn.init.uniform_(self.conv1.weight, a=0, b=1)
-        nn.init.uniform_(self.conv2.weight, a=-1, b=1)
+        # self.conv1 = torch.nn.Conv2d(self.dp_head_conv_dim, self.dp_head_conv_dim, 3, 1, 1)
+        # self.conv2 = torch.nn.Conv2d(self.dp_head_conv_dim, self.dp_embed_dim, 3, 1, 1)
+        # nn.init.kaiming_normal_(self.conv1.weight, mode="fan_out", nonlinearity="relu")
+        # nn.init.kaiming_normal_(self.conv2.weight, mode="fan_out", nonlinearity="relu")
 
 
 
@@ -195,14 +195,17 @@ class DensePoseHead(nn.Module):
         features_dp = self.densepose_pooler(features_list, pred_boxes)
         if len(features_dp) > 0:
             densepose_head_outputs = self.densepose_head(features_dp)
-            # densepose_predictor_outputs = self.embed_lowres(densepose_head_outputs)
+
+            #transposed conv
+            densepose_predictor_outputs = self.embed_lowres(densepose_head_outputs)
+            densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
 
             # only if we use convs instead of transposed conv
-            densepose_predictor_outputs = self.conv1(densepose_head_outputs)
-            densepose_predictor_outputs = F.relu(densepose_predictor_outputs)
-            densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
-            densepose_predictor_outputs = self.conv2(densepose_predictor_outputs)
-            densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
+            # densepose_predictor_outputs = self.conv1(densepose_head_outputs)
+            # densepose_predictor_outputs = F.relu(densepose_predictor_outputs)
+            # densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
+            # densepose_predictor_outputs = self.conv2(densepose_predictor_outputs)
+            # densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
         else:
             densepose_predictor_outputs = None
         return densepose_predictor_outputs

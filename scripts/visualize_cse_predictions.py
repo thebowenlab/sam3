@@ -42,10 +42,9 @@ def get_vertex_colors_from_embeddings(
         embed_map = torch.tensor(embed_map).float()[:, 0]
         embed_map -= embed_map.min()
         embed_map /= embed_map.max()
-        embed_map *= 256
+        embed_map *= 255
         color_map = cv2.applyColorMap((embed_map.to(dtype=torch.uint8)).numpy(), cv2.COLORMAP_JET)
-        return torch.tensor(color_map, dtype=torch.float32, device=device).squeeze(1)
-        # return colors.to(dtype=torch.float32, device=device)
+        return torch.tensor(color_map, dtype=torch.float32, device=device).squeeze(1)/255
 
     mean = embeddings.mean(dim=0, keepdim=True)
     centered = embeddings - mean
@@ -99,6 +98,7 @@ def visualize_instance(
         alpha: overlay transparency
     """
     x, y, w, h = [int(v) for v in bbox_xywh]
+    # pred_mask = (pred_mask.int()*0+1).bool()
     if w <= 0 or h <= 0:
         return image_bgr
 
@@ -144,6 +144,7 @@ def visualize_instance(
         closest_list.append(edm.argmin(dim=1))
     closest_verts = torch.cat(closest_list)  # [J]
     print(closest_verts)
+    print("Unique Verts: ", closest_verts.unique().numel())
 
 
     # Map to PCA colors
@@ -218,7 +219,6 @@ def main():
     predictions = data["predictions"]
     mesh_embeddings = data["mesh_embeddings"]
     print(f"Loaded {len(predictions)} predictions")
-
 
     # Precompute vertex embeddings and PCA colors (once)
     vertex_colors = {}

@@ -215,7 +215,7 @@ class CSEPerPointGPSMeter:
                         "image_id": metadata.original_image_id[i].item(),
                         "bbox": boxes[i][j],
                         "score": scores[i][j],
-                        "embedding": batch_embeddings[i].cpu(),
+                        "embedding": batch_embeddings[j].cpu(),
                         "mask": out_masks[i][j].squeeze(0),
                         "mesh_name": self.cat_to_mesh[metadata.original_category_id[i].item()],
                     })
