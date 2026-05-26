@@ -66,13 +66,15 @@ class Sam3DensePoseImage(Sam3Image):
         self.densepose_head = densepose_head
         self.cse_embedder = cse_embedder
 
-    def _run_densepose_head(self, out, backbone_out, img_ids, encoder_hidden_states):
+    def _run_densepose_head(self, out, backbone_out, img_ids, encoder_hidden_states, prompt, prompt_mask):
  
-        densepose_head_outputs, densepose_head_outputs_o2m = activation_ckpt_wrapper(self.densepose_head)(
+        densepose_head_outputs, densepose_head_outputs_o2m = self.densepose_head(
                 out=out,
                 backbone_out=backbone_out,
                 image_ids=img_ids,
                 encoder_hidden_states=encoder_hidden_states,
+                prompt=prompt,
+                prompt_mask=prompt_mask,
             )
         out["pred_embeddings"] = densepose_head_outputs
         out["pred_embeddings_o2m"] = densepose_head_outputs_o2m
@@ -130,7 +132,6 @@ class Sam3DensePoseImage(Sam3Image):
         if self.training or self.num_interactive_steps_val > 0:
             self._compute_matching(out, self.back_convert(find_target))
 
-
         # Run densepose head
         with torch.profiler.record_function("SAM3DensePoseImage._run_densepose_head"):
             self._run_densepose_head(
@@ -138,8 +139,9 @@ class Sam3DensePoseImage(Sam3Image):
                 backbone_out=backbone_out,
                 img_ids=find_input.img_ids,
                 encoder_hidden_states=out["encoder_hidden_states"],
+                prompt=prompt,
+                prompt_mask=prompt_mask,
             )
-
 
 
         return out

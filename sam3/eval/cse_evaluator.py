@@ -129,8 +129,8 @@ class PerPointGPSEvaluator:
         # GT point coords: convert to bbox-relative pixel coords
         dy = int(pred_bbox_xywh[3])
         dx = int(pred_bbox_xywh[2])
-        dp_x = gt_points_x * gt_abs_bbox_xywh[2] / 255.0
-        dp_y = gt_points_y * gt_abs_bbox_xywh[3] / 255.0
+        dp_x = gt_points_x * gt_abs_bbox_xywh[2] / 256.0
+        dp_y = gt_points_y * gt_abs_bbox_xywh[3] / 256.0
         abs_px = (dp_x + gt_abs_bbox_xywh[0]).to(torch.int)
         abs_py = (dp_y + gt_abs_bbox_xywh[1]).to(torch.int)
         py = (abs_py - pred_bbox_xywh[1]).to(torch.int)

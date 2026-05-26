@@ -12,6 +12,10 @@ import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from sam3.model.poolers import ROIPooler, Boxes
 
+from sam3.model.model_misc import (
+    MultiheadAttentionWrapper as MultiheadAttention,
+)
+
 
 
 def initialize_module_params(module: nn.Module) -> None:
@@ -162,7 +166,7 @@ class DensePoseHead(nn.Module):
 
     def _init_densepose_head(self):       
 
-        self.decoder = pixel_decoder = PixelDecoder(
+        self.decoder = PixelDecoder(
             num_upsampling_stages=3,
             interpolation_mode="nearest",
             hidden_dim=self.bb_channels,
@@ -174,6 +178,14 @@ class DensePoseHead(nn.Module):
             sampling_ratio=self.dp_pooler_sampling_ratio,
             pooler_type=self.dp_pooler_type,
         )
+
+        self.cross_attend_prompt = MultiheadAttention(
+            num_heads=8,
+            dropout=0,
+            embed_dim=256,
+        )
+        self.cross_attn_norm = nn.LayerNorm(256)
+
         self.densepose_head = DensePoseV1ConvXHead(self.bb_channels)
 
         self.embed_lowres = torch.nn.ConvTranspose2d(
@@ -182,14 +194,6 @@ class DensePoseHead(nn.Module):
         nn.init.kaiming_normal_(self.embed_lowres.weight, mode="fan_out", nonlinearity="relu")
         nn.init.constant_(self.embed_lowres.bias, 0)
 
-        # To try and get rid of checkerboard artifacts
-        # self.conv1 = torch.nn.Conv2d(self.dp_head_conv_dim, self.dp_head_conv_dim, 3, 1, 1)
-        # self.conv2 = torch.nn.Conv2d(self.dp_head_conv_dim, self.dp_embed_dim, 3, 1, 1)
-        # nn.init.kaiming_normal_(self.conv1.weight, mode="fan_out", nonlinearity="relu")
-        # nn.init.kaiming_normal_(self.conv2.weight, mode="fan_out", nonlinearity="relu")
-
-
-
     def compute_densepose_outputs(self, features_list, output_boxes_xyxy):
         pred_boxes = convert_prediction_boxes(output_boxes_xyxy)
         features_dp = self.densepose_pooler(features_list, pred_boxes)
@@ -197,24 +201,30 @@ class DensePoseHead(nn.Module):
             densepose_head_outputs = self.densepose_head(features_dp)
 
             #transposed conv
-            densepose_predictor_outputs = self.embed_lowres(densepose_head_outputs)
-            densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
+            densepose_head_outputs = self.embed_lowres(densepose_head_outputs)
+            densepose_head_outputs = F.interpolate(densepose_head_outputs, scale_factor=2, mode="bilinear", align_corners=False)
 
-            # only if we use convs instead of transposed conv
-            # densepose_predictor_outputs = self.conv1(densepose_head_outputs)
-            # densepose_predictor_outputs = F.relu(densepose_predictor_outputs)
-            # densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
-            # densepose_predictor_outputs = self.conv2(densepose_predictor_outputs)
-            # densepose_predictor_outputs = F.interpolate(densepose_predictor_outputs, scale_factor=2, mode="bilinear", align_corners=False)
         else:
-            densepose_predictor_outputs = None
-        return densepose_predictor_outputs
+            densepose_head_outputs = None
+        return densepose_head_outputs
 
 
-    def forward(self, out, backbone_out, image_ids, encoder_hidden_states):
+    def forward(self, out, backbone_out, image_ids, encoder_hidden_states, prompt, prompt_mask):
         backbone_feats = backbone_out["backbone_fpn"]
+
         # backbone_feats = [x for x in backbone_feats]
         # pixel_embed = self.decoder(backbone_feats)
+
+
+        if self.cross_attend_prompt is not None:
+            tgt2 = self.cross_attn_norm(encoder_hidden_states)
+            tgt2 = self.cross_attend_prompt(
+                query=tgt2,
+                key=prompt,
+                value=prompt,
+                key_padding_mask=prompt_mask,
+            )[0]
+            encoder_hidden_states = tgt2 + encoder_hidden_states
 
         if backbone_feats[0].shape[0] > 1:
                 # For bs > 1, we construct the per query backbone features
