@@ -36,6 +36,7 @@ class Sam3DensePoseImage(Sam3Image):
         use_act_checkpoint_seg_head: bool = True,
         interactivity_in_encoder: bool = True,
         matcher=None,
+        o2m_matcher=None,
         use_dot_prod_scoring=True,
         supervise_joint_box_scores: bool = False,  # only relevant if using presence token/score
         detach_presence_in_joint_score: bool = False,  # only relevant if using presence token/score
@@ -65,6 +66,7 @@ class Sam3DensePoseImage(Sam3Image):
             **kwargs)
         self.densepose_head = densepose_head
         self.cse_embedder = cse_embedder
+        self.o2m_matcher = o2m_matcher
 
     def _run_densepose_head(self, out, backbone_out, img_ids, encoder_hidden_states, prompt, prompt_mask):
  
@@ -78,7 +80,7 @@ class Sam3DensePoseImage(Sam3Image):
             )
         out["pred_embeddings"] = densepose_head_outputs
         out["pred_embeddings_o2m"] = densepose_head_outputs_o2m
-
+        
 
     def forward_grounding(
         self,
@@ -145,6 +147,16 @@ class Sam3DensePoseImage(Sam3Image):
 
 
         return out
+
+    def _compute_matching(self, out, targets):
+        out["indices"] = self.matcher(out, targets)
+        o2m_dict = {"pred_logits": out["pred_logits_o2m"],
+                    "pred_boxes": out["pred_boxes_o2m"]}
+        out["indices_o2m"] = self.o2m_matcher(o2m_dict, targets)
+        for aux_out in out.get("aux_outputs", []):
+            aux_out["indices"] = self.matcher(aux_out, targets)
+
+
 
     def back_convert(self, targets):
         batched_targets = {

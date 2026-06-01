@@ -85,6 +85,10 @@ class Sam3LossWrapper(torch.nn.Module):
         o2m_out_is_valid = nested_out.get("o2m_out_is_valid", None)
         o2m_target_is_valid_padded = nested_out.get("o2m_target_is_valid_padded", None)
 
+        # Adding the following assert block for now to ensure it's consistent with the o2m matching 
+        # done in the forward for densepose models
+        assert o2m_out_is_valid is None and o2m_target_is_valid_padded is None
+
         # Get a list of outputs, including auxiliary and first stage outputs
         output_list = [(nested_out, "", False)]  # (out, suffix, is_aux)
         if "aux_outputs" in nested_out:
@@ -111,7 +115,9 @@ class Sam3LossWrapper(torch.nn.Module):
                     o2m_out["mesh_embeddings"] = out["mesh_embeddings"]
                 # o2m targets are the same as the o2o targets (assuming repeat=1)
                 o2m_targets = targets
-                if self.use_o2m_matcher_on_o2m_aux or not is_aux:
+                if "indices_o2m" in out.keys():
+                    o2m_indices = out["indices_o2m"]
+                elif self.use_o2m_matcher_on_o2m_aux or not is_aux:
                     o2m_indices = self.o2m_matcher(
                         o2m_out,
                         o2m_targets,

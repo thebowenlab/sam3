@@ -116,15 +116,13 @@ class BilinearInterpolationHelper:
         Return:
             An instance of `BilinearInterpolationHelper` used to perform
             interpolation for the given annotation points and output resolution
-        """
-        idx_tensor = torch.zeros(x_gt.shape, dtype=torch.int, device=pred_box.device)
-        
+        """        
         zh, zw = densepose_outputs_size_hw
         # print("pred_box shape:", pred_box.shape)
         # print("gt_box shape:", gt_box.shape)
-        
-        x0_gt, y0_gt, w_gt, h_gt = box_cxcywh_to_xywh(gt_box[idx_tensor]).unbind(dim=1)
-        x0_est, y0_est, w_est, h_est = box_cxcywh_to_xywh(pred_box[idx_tensor]).unbind(dim=1)
+
+        x0_gt, y0_gt, w_gt, h_gt = box_cxcywh_to_xywh(gt_box).unbind(dim=1)
+        x0_est, y0_est, w_est, h_est = box_cxcywh_to_xywh(pred_box).unbind(dim=1)
         x_lo, x_hi, x_w, jx_valid = _linear_interpolation_utilities(
             x_gt, x0_gt, w_gt, x0_est, w_est, zw
         )
@@ -153,6 +151,7 @@ class BilinearInterpolationHelper:
     def extract_at_points(
         self,
         z_est,
+        idx_tensor,
         slice_fine_segm=None,
         w_ylo_xlo=None,
         w_ylo_xhi=None,
@@ -172,7 +171,7 @@ class BilinearInterpolationHelper:
         #     if slice_fine_segm is None
         #     else slice_fine_segm
         # )
-        idx_tensor = torch.zeros(w_ylo_xlo.shape[0], dtype=torch.int, device=z_est.device)
+        # idx_tensor = torch.zeros(w_ylo_xlo.shape[0], dtype=torch.int, device=z_est.device)
         # print(z_est.shape)
 
         w_ylo_xlo = self.w_ylo_xlo if w_ylo_xlo is None else w_ylo_xlo
@@ -305,6 +304,7 @@ class CSESoftEmbeddingLoss(LossWithWeights):
             ]
         )
 
+
     def get_loss(self, outputs, targets, indices, num_boxes):
         """
         Compute the CSE soft embedding loss.
@@ -312,12 +312,11 @@ class CSESoftEmbeddingLoss(LossWithWeights):
         This mirrors detectron2's SoftEmbeddingLoss but fits into SAM3's
         LossWithWeights interface (receives outputs, targets, indices, num_boxes).
         """
-
+        # embeddings are already filtered to only matched predictions.
         pred_embeddings = outputs["pred_embeddings"]  # [N, D, S, S]
         # print(pred_embeddings.norm(dim=1).mean())
         # print(indices)
         h, w = pred_embeddings.shape[2:]
-        numQ = outputs["pred_boxes"].shape[1]
 
         pred_boxes = outputs["pred_boxes"][indices[0], indices[1]]
         target_boxes = targets["boxes"] if indices[2] is None else targets["boxes"][indices[2]] # [M, 4] where M is number of matches
@@ -329,38 +328,51 @@ class CSESoftEmbeddingLoss(LossWithWeights):
         dp_vertex = targets["dp_vertex"] if indices[2] is None else [targets["dp_vertex"][indices[2][i]] for i in range(len(indices[2]))]
 
         total_loss = pred_embeddings.sum()*0
-        num_matches = indices[1].shape[0]
-        num_contributing_points = 0
+        matches = indices[1].shape[0]
 
-        for match_num in range(num_matches):
-            mesh_name = ref_model[match_num]
-            if mesh_name is None or mesh_name not in outputs["mesh_embeddings"].keys():
+        for m in range(matches):
+            if dp_x[m] is None:
+                dp_x[m] = torch.tensor([], dtype=torch.float, device=pred_embeddings.device) 
+                dp_y[m] = torch.tensor([], dtype=torch.float, device=pred_embeddings.device)
+                dp_vertex[m] = torch.tensor([], dtype=torch.int, device=pred_embeddings.device)
+                ref_model[m] = ""
+
+        # Collate all point data
+        all_pred_boxes = torch.cat([pred_boxes[m].repeat(len(dp_x[m]), 1) for m in range(matches)], dim=0)  # [P, 4]
+        all_gt_boxes = torch.cat([target_boxes[m].repeat(len(dp_x[m]), 1) for m in range(matches)], dim=0)  # [P, 4]
+        all_dp_x = torch.cat([dp_x[m] for m in range(matches)], dim=0)  # [P]
+        all_dp_y = torch.cat([dp_y[m] for m in range(matches)], dim=0)  # [P]
+        all_dp_vertex = torch.cat([dp_vertex[m] for m in range(matches)], dim=0)  # [P]
+        all_mesh_names = sum([[ref_model[m]] * len(dp_x[m]) for m in range(matches)], [])
+
+        # Embeddings should already be filtered to matched predictions
+        embed_index = torch.tensor(range(matches), dtype=torch.long, device=pred_embeddings.device)
+        all_embed_idx = torch.cat([embed_index[m].repeat(len(dp_x[m]), 1) for m in range(matches)], dim=0).squeeze()  # [P]
+        
+
+        interpolator = BilinearInterpolationHelper.from_matches(
+            all_pred_boxes,
+            all_gt_boxes,
+            all_dp_x,
+            all_dp_y,
+            (h, w),
+        )
+
+
+        losses = {}
+        for mesh_id in outputs["mesh_embeddings"].keys():
+            # valid points are those that fall into estimated bbox
+            # and correspond to the current mesh
+            losses[mesh_id] = dummy_loss(pred_embeddings, outputs["mesh_embeddings"][mesh_id])
+            j_valid = interpolator.j_valid * torch.tensor([mesh_name == mesh_id for mesh_name in all_mesh_names], dtype=torch.bool, device=pred_embeddings.device)
+            if not torch.any(j_valid):
                 continue
-            
-            # -> tensor [K, D]
-            mesh_vertex_embeddings = outputs["mesh_embeddings"][mesh_name]
-
-            mesh = create_mesh(mesh_name, mesh_vertex_embeddings.device)
-            dp_vertices = torch.tensor(dp_vertex[match_num], device = pred_embeddings.device)
-            # print(match_num, pred_boxes[match_num], target_boxes[match_num], dp_x[match_num], dp_y[match_num])
-
-            interpolator = BilinearInterpolationHelper.from_matches(
-                pred_boxes[match_num].unsqueeze(0),
-                target_boxes[match_num].unsqueeze(0),
-                dp_x[match_num],
-                dp_y[match_num],
-                (h, w),
-            )
-            j_valid = interpolator.j_valid
-
-
-            if torch.sum(j_valid) == 0: # no valid points shouldn't contribute to loss
-                total_loss += dummy_loss(pred_embeddings, mesh_vertex_embeddings)
-                continue
-            embed_index = indices[0][match_num]*numQ+indices[1][match_num]
+            # extract estimated embeddings for valid points
+            # -> tensor [J, D]
             vertex_embeddings_i = normalize_embeddings(
                 interpolator.extract_at_points(
-                    pred_embeddings[embed_index].unsqueeze(0),
+                    pred_embeddings,
+                    all_embed_idx,
                     slice_fine_segm=slice(None),
                     w_ylo_xlo=interpolator.w_ylo_xlo[:, None],  # pyre-ignore[16]
                     w_ylo_xhi=interpolator.w_ylo_xhi[:, None],  # pyre-ignore[16]
@@ -368,13 +380,19 @@ class CSESoftEmbeddingLoss(LossWithWeights):
                     w_yhi_xhi=interpolator.w_yhi_xhi[:, None],  # pyre-ignore[16]
                 )[j_valid, :]
             )
-            # print(vertex_embeddings_i.shape)
-
+            # extract vertex ids for valid points
+            # -> tensor [J]
+            vertex_indices_i = all_dp_vertex[j_valid]
+            # embeddings for all mesh vertices
+            # -> tensor [K, D]
+            mesh_vertex_embeddings = outputs["mesh_embeddings"][mesh_id]
+            # softmax values of geodesic distances for GT mesh vertices
+            # -> tensor [J, K]
+            mesh = create_mesh(mesh_id, mesh_vertex_embeddings.device)
+            # print(vertex_indices_i.dtype)
             geodist_softmax_values = F.softmax(
-                mesh.geodists[dp_vertices[j_valid]] / (-self.geodist_gauss_sigma), dim=1
-            ) # 
-
-
+                mesh.geodists[vertex_indices_i] / (-self.geodist_gauss_sigma), dim=1
+            )
             # logsoftmax values for valid points
             # -> tensor [J, K]
             embdist_logsoftmax_values = F.log_softmax(
@@ -382,19 +400,103 @@ class CSESoftEmbeddingLoss(LossWithWeights):
                 / (-self.embdist_gauss_sigma),
                 dim=1,
             )
+            losses[mesh_id] = (-geodist_softmax_values * embdist_logsoftmax_values).sum(1).mean()
 
-
-            # dists = squared_euclidean_distance_matrix(vertex_embeddings_i, mesh_vertex_embeddings)
-            # print("dist range:", dists.min().item(), dists.max().item(), dists.mean().item())
-            # dists = squared_euclidean_distance_matrix(vertex_embeddings_i, vertex_embeddings_i)
-            # print("distself range:", dists.min().item(), dists.max().item(), dists.mean().item())
-            # dists = squared_euclidean_distance_matrix(mesh_vertex_embeddings, mesh_vertex_embeddings)
-            # print("meshdist range:", dists.min().item(), dists.max().item(), dists.mean().item())
-
-            num_contributing_points += j_valid.sum()
-            # total_loss += (-geodist_softmax_values * embdist_logsoftmax_values).sum(1).mean()
-            total_loss += (-geodist_softmax_values * embdist_logsoftmax_values).sum()
-        # print(total_loss)
-        if num_contributing_points > 0:
-            total_loss /= num_contributing_points
+        # pyre-fixme[29]: `Union[(self: Tensor) -> Any, Module, Tensor]` is not a
+        #  function.
+        total_loss += sum(losses.values())
         return {"loss_cse_embed": total_loss}
+
+    # def get_loss(self, outputs, targets, indices, num_boxes):
+    #     """
+    #     Compute the CSE soft embedding loss.
+
+    #     This mirrors detectron2's SoftEmbeddingLoss but fits into SAM3's
+    #     LossWithWeights interface (receives outputs, targets, indices, num_boxes).
+    #     """
+
+    #     pred_embeddings = outputs["pred_embeddings"]  # [N, D, S, S]
+    #     # print(pred_embeddings.norm(dim=1).mean())
+    #     # print(indices)
+    #     h, w = pred_embeddings.shape[2:]
+    #     numQ = outputs["pred_boxes"].shape[1]
+
+    #     pred_boxes = outputs["pred_boxes"][indices[0], indices[1]]
+    #     target_boxes = targets["boxes"] if indices[2] is None else targets["boxes"][indices[2]] # [M, 4] where M is number of matches
+
+    #     dp_x = targets["dp_x"] if indices[2] is None else [targets["dp_x"][indices[2][i]] for i in range(len(indices[2]))]
+    #     dp_y = targets["dp_y"] if indices[2] is None else [targets["dp_y"][indices[2][i]] for i in range(len(indices[2]))]
+
+    #     ref_model = targets["ref_model"] if indices[2] is None else [targets["ref_model"][indices[2][i]] for i in range(len(indices[2]))]
+    #     dp_vertex = targets["dp_vertex"] if indices[2] is None else [targets["dp_vertex"][indices[2][i]] for i in range(len(indices[2]))]
+
+    #     total_loss = pred_embeddings.sum()*0
+    #     num_matches = indices[1].shape[0]
+    #     num_contributing_points = 0
+
+    #     for match_num in range(num_matches):
+    #         mesh_name = ref_model[match_num]
+    #         if mesh_name is None or mesh_name not in outputs["mesh_embeddings"].keys():
+    #             continue
+            
+    #         # -> tensor [K, D]
+    #         mesh_vertex_embeddings = outputs["mesh_embeddings"][mesh_name]
+
+    #         mesh = create_mesh(mesh_name, mesh_vertex_embeddings.device)
+    #         dp_vertices = torch.tensor(dp_vertex[match_num], device = pred_embeddings.device)
+    #         # print(match_num, pred_boxes[match_num], target_boxes[match_num], dp_x[match_num], dp_y[match_num])
+
+    #         interpolator = BilinearInterpolationHelper.from_matches(
+    #             pred_boxes[match_num].unsqueeze(0),
+    #             target_boxes[match_num].unsqueeze(0),
+    #             dp_x[match_num],
+    #             dp_y[match_num],
+    #             (h, w),
+    #         )
+    #         j_valid = interpolator.j_valid
+
+
+    #         if torch.sum(j_valid) == 0: # no valid points shouldn't contribute to loss
+    #             total_loss += dummy_loss(pred_embeddings, mesh_vertex_embeddings)
+    #             continue
+    #         embed_index = indices[0][match_num]*numQ+indices[1][match_num]
+    #         vertex_embeddings_i = normalize_embeddings(
+    #             interpolator.extract_at_points(
+    #                 pred_embeddings[embed_index].unsqueeze(0),
+    #                 slice_fine_segm=slice(None),
+    #                 w_ylo_xlo=interpolator.w_ylo_xlo[:, None],  # pyre-ignore[16]
+    #                 w_ylo_xhi=interpolator.w_ylo_xhi[:, None],  # pyre-ignore[16]
+    #                 w_yhi_xlo=interpolator.w_yhi_xlo[:, None],  # pyre-ignore[16]
+    #                 w_yhi_xhi=interpolator.w_yhi_xhi[:, None],  # pyre-ignore[16]
+    #             )[j_valid, :]
+    #         )
+    #         # print(vertex_embeddings_i.shape)
+
+    #         geodist_softmax_values = F.softmax(
+    #             mesh.geodists[dp_vertices[j_valid]] / (-self.geodist_gauss_sigma), dim=1
+    #         ) # 
+
+
+    #         # logsoftmax values for valid points
+    #         # -> tensor [J, K]
+    #         embdist_logsoftmax_values = F.log_softmax(
+    #             squared_euclidean_distance_matrix(vertex_embeddings_i, mesh_vertex_embeddings)
+    #             / (-self.embdist_gauss_sigma),
+    #             dim=1,
+    #         )
+
+
+    #         # dists = squared_euclidean_distance_matrix(vertex_embeddings_i, mesh_vertex_embeddings)
+    #         # print("dist range:", dists.min().item(), dists.max().item(), dists.mean().item())
+    #         # dists = squared_euclidean_distance_matrix(vertex_embeddings_i, vertex_embeddings_i)
+    #         # print("distself range:", dists.min().item(), dists.max().item(), dists.mean().item())
+    #         # dists = squared_euclidean_distance_matrix(mesh_vertex_embeddings, mesh_vertex_embeddings)
+    #         # print("meshdist range:", dists.min().item(), dists.max().item(), dists.mean().item())
+
+    #         num_contributing_points += j_valid.sum()
+    #         # total_loss += (-geodist_softmax_values * embdist_logsoftmax_values).sum(1).mean()
+    #         total_loss += (-geodist_softmax_values * embdist_logsoftmax_values).sum()
+    #     # print(total_loss)
+    #     if num_contributing_points > 0:
+    #         total_loss /= num_contributing_points
+    #     return {"loss_cse_embed": total_loss}

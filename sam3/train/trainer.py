@@ -14,6 +14,9 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional
 
+import torchvision.models as models
+from torch.profiler import profile, ProfilerActivity, record_function
+
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -562,6 +565,7 @@ class Trainer:
                     self.epoch -= 1
                     self.run_val()
                     self.epoch += 1
+            
             self.run_train()
             self.run_val()
         elif self.mode == "val":

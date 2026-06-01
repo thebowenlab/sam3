@@ -94,6 +94,7 @@ class Pix2ShapeLoss(LossWithWeights):
         """
         Compute the Pix2Shape loss.
         """
+        # Embeddings should already be filtered to only matched predictions
         pred_embeddings = outputs["pred_embeddings"]
 
         if self.pixel_dists is None:
@@ -119,8 +120,8 @@ class Pix2ShapeLoss(LossWithWeights):
             box_gt = gt_boxes[match_num]
             mask_gt = _crop_and_rescale_mask(gt_masks[match_num], box_gt, h, w)
 
-            embed_index = indices[0][match_num]*numQ+indices[1][match_num]
-            pixel_embeddings = pred_embeddings[embed_index]
+
+            pixel_embeddings = pred_embeddings[match_num]
             # -> tensor [K, D]
             mesh_vertex_embeddings = outputs["mesh_embeddings"][mesh_name]
 

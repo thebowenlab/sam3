@@ -227,7 +227,7 @@ class COCO_FROM_JSON:
                 annotation["area"] = (bbox[2] * bbox[3]).item()
                 annotation["bbox"] = bbox
                 if "dp_vertex" in ann.keys():
-                    annotation["dp_vertex"] = ann["dp_vertex"]
+                    annotation["dp_vertex"] = torch.tensor(ann["dp_vertex"], dtype=torch.long)
                     # dpx,dpy are specified within 256x256 frame
                     annotation["dp_x"] = torch.tensor(ann["dp_x"], dtype=torch.float32)
                     annotation["dp_y"] = torch.tensor(ann["dp_y"], dtype=torch.float32)

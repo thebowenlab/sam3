@@ -46,6 +46,12 @@ from sam3.model.vitdet import ViT
 from sam3.model.vl_combiner import SAM3VLBackbone
 from sam3.sam.transformer import RoPEAttention
 
+from iopath.common.file_io import PathManager as PathManagerBase
+import pickle
+import numpy as np
+
+PathManager = PathManagerBase()
+
 
 # Setup TensorFloat-32 for Ampere GPUs if available
 def _setup_tf32() -> None:
@@ -344,6 +350,8 @@ def _create_sam3_densepose_model(
     dot_prod_scoring,
     inst_interactive_predictor,
     eval_mode,
+    matcher,
+    o2m_matcher,
 ):
     """Create the SAM3 image model."""
     common_params = {
@@ -359,28 +367,23 @@ def _create_sam3_densepose_model(
         "use_instance_query": False,
         "multimask_output": True,
         "inst_interactive_predictor": inst_interactive_predictor,
+        "matcher": matcher,
+        "o2m_matcher": o2m_matcher,
     }
 
-    matcher = None
-    if not eval_mode:
-        from sam3.train.matcher import BinaryHungarianMatcherV2
-
-        matcher = BinaryHungarianMatcherV2(
-            focal=True,
-            cost_class=2.0,
-            cost_bbox=5.0,
-            cost_giou=2.0,
-            alpha=0.25,
-            gamma=2,
-            stable=False,
-        )
-    common_params["matcher"] = matcher
+    if eval_mode:
+        common_params["matcher"] = None
+        common_params["o2m_matcher"] = None
     model = Sam3DensePoseImage(**common_params)
+
+
+
 
     # For freezing different parts
     for name, param in model.named_parameters():
         # if name.startswith("backbone") or name.startswith("cse_embedder"):
-        if not name.startswith("densepose_head") and not name.startswith("cse_embedder"):
+        # if not name.startswith("densepose_head") and not name.startswith("cse_embedder"):
+        if not name.startswith("densepose_head.decoder") and not name.startswith("densepose_head.cross_att"):
             param.requires_grad = False
 
     return model
@@ -701,15 +704,17 @@ def build_sam3_densepose_image_model(
     device="cuda" if torch.cuda.is_available() else "cpu",
     eval_mode=True,
     checkpoint_path=None,
+    dp_init_path=None,
     load_from_HF=True,
     enable_segmentation=True,
     enable_inst_interactivity=False,
     compile=False,
-    cse_embedder=None
+    cse_embedder=None,
+    matcher=None,
+    o2m_matcher=None,
 ):
     """
-    Build SAM3 image model with a 
-     head
+    Build SAM3 image model with a densepose head
 
     Args:
         bpe_path: Path to the BPE tokenizer vocabulary
@@ -721,7 +726,7 @@ def build_sam3_densepose_image_model(
         compile_mode: To enable compilation, set to "default"
 
     Returns:
-        A SAM3 image model
+        A SAM3 densepose image model
     """
     if bpe_path is None:
         bpe_path = pkg_resources.resource_filename(
@@ -774,7 +779,65 @@ def build_sam3_densepose_image_model(
         dot_prod_scoring,
         inst_predictor,
         eval_mode,
+        matcher,
+        o2m_matcher,
     )
+
+    # densepose head initialization from pretrained model (detectron2 framework)
+
+    detectron_to_sam3 = {
+        "roi_heads.densepose_head.body_conv_fcn1.weight": "densepose_head.densepose_head.body_conv_fcn1.weight",
+        "roi_heads.densepose_head.body_conv_fcn1.bias": "densepose_head.densepose_head.body_conv_fcn1.bias",
+        "roi_heads.densepose_head.body_conv_fcn2.weight": "densepose_head.densepose_head.body_conv_fcn2.weight",
+        "roi_heads.densepose_head.body_conv_fcn2.bias": "densepose_head.densepose_head.body_conv_fcn2.bias",
+        "roi_heads.densepose_head.body_conv_fcn3.weight": "densepose_head.densepose_head.body_conv_fcn3.weight",
+        "roi_heads.densepose_head.body_conv_fcn3.bias": "densepose_head.densepose_head.body_conv_fcn3.bias",
+        "roi_heads.densepose_head.body_conv_fcn4.weight": "densepose_head.densepose_head.body_conv_fcn4.weight",
+        "roi_heads.densepose_head.body_conv_fcn4.bias": "densepose_head.densepose_head.body_conv_fcn4.bias",
+        "roi_heads.densepose_head.body_conv_fcn5.weight": "densepose_head.densepose_head.body_conv_fcn5.weight",
+        "roi_heads.densepose_head.body_conv_fcn5.bias": "densepose_head.densepose_head.body_conv_fcn5.bias",
+        "roi_heads.densepose_head.body_conv_fcn6.weight": "densepose_head.densepose_head.body_conv_fcn6.weight",
+        "roi_heads.densepose_head.body_conv_fcn6.bias": "densepose_head.densepose_head.body_conv_fcn6.bias",
+        "roi_heads.densepose_head.body_conv_fcn7.weight": "densepose_head.densepose_head.body_conv_fcn7.weight",
+        "roi_heads.densepose_head.body_conv_fcn7.bias": "densepose_head.densepose_head.body_conv_fcn7.bias",
+        "roi_heads.densepose_head.body_conv_fcn8.weight": "densepose_head.densepose_head.body_conv_fcn8.weight",
+        "roi_heads.densepose_head.body_conv_fcn8.bias": "densepose_head.densepose_head.body_conv_fcn8.bias",
+        "roi_heads.densepose_predictor.embed_lowres.weight": "densepose_head.embed_lowres.weight",
+        "roi_heads.densepose_predictor.embed_lowres.bias": "densepose_head.embed_lowres.bias",
+        "roi_heads.embedder.embedder_smpl_27554.embeddings": "cse_embedder.embedder_smpl_27554.embeddings",
+        "roi_heads.embedder.embedder_smpl_27554.feature": "cse_embedder.embedder_smpl_27554.feature",
+    }
+
+    # updated = {}
+    # for name, param in model.named_parameters():
+    #     # if name.startswith("backbone") or name.startswith("cse_embedder"):
+    #     print(name, param.numel(), param.norm())
+    #     updated[name] = param.norm()
+
+    if dp_init_path is not None:
+        state_dict = None
+        if dp_init_path.endswith(".pkl"):
+            with PathManager.open(dp_init_path, "rb") as hFile:
+                state_dict = pickle.load(hFile, encoding="latin1")
+        else:
+            with PathManager.open(dp_init_path, "rb") as hFile:
+                state_dict = torch.load(hFile, map_location=torch.device("cpu"))
+        if state_dict is not None and "model" in state_dict:
+            state_dict_local = {}
+            for key in state_dict["model"]:
+                if key in detectron_to_sam3.keys():
+                    v_key = state_dict["model"][key]
+                    if isinstance(v_key, np.ndarray):
+                        v_key = torch.from_numpy(v_key)
+                    print(key, v_key.numel())
+                    state_dict_local[detectron_to_sam3[key]] = v_key
+            # non-strict loading to finetune on different meshes
+            model.load_state_dict(state_dict_local, strict=False)
+
+    # for name, param in model.named_parameters():
+    #     print(name, param.norm()-updated[name])
+
+
     if load_from_HF and checkpoint_path is None:
         checkpoint_path = download_ckpt_from_hf()
     # Load checkpoint if provided

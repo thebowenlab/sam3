@@ -25,7 +25,14 @@ def initialize_module_params(module: nn.Module) -> None:
         elif "weight" in name:
             nn.init.kaiming_normal_(param, mode="fan_out", nonlinearity="relu")
 
-def convert_prediction_boxes(pred_boxes):
+def convert_prediction_boxes(pred_boxes, indices=None):
+    if indices is not None:
+        box_list = []
+        for i in range(pred_boxes.shape[0]):
+            mask = indices[0]==i
+            box_list.append(Boxes(pred_boxes[indices[0][mask], indices[1][mask]]))
+        return box_list
+
     return [Boxes(pred_boxes[i]) for i in range(pred_boxes.shape[0])]
 
 @dataclass
@@ -194,8 +201,8 @@ class DensePoseHead(nn.Module):
         nn.init.kaiming_normal_(self.embed_lowres.weight, mode="fan_out", nonlinearity="relu")
         nn.init.constant_(self.embed_lowres.bias, 0)
 
-    def compute_densepose_outputs(self, features_list, output_boxes_xyxy):
-        pred_boxes = convert_prediction_boxes(output_boxes_xyxy)
+    def compute_densepose_outputs(self, features_list, output_boxes_xyxy, indices=None):
+        pred_boxes = convert_prediction_boxes(output_boxes_xyxy, indices)
         features_dp = self.densepose_pooler(features_list, pred_boxes)
         if len(features_dp) > 0:
             densepose_head_outputs = self.densepose_head(features_dp)
@@ -211,9 +218,6 @@ class DensePoseHead(nn.Module):
 
     def forward(self, out, backbone_out, image_ids, encoder_hidden_states, prompt, prompt_mask):
         backbone_feats = backbone_out["backbone_fpn"]
-
-        # backbone_feats = [x for x in backbone_feats]
-        # pixel_embed = self.decoder(backbone_feats)
 
 
         if self.cross_attend_prompt is not None:
@@ -248,11 +252,18 @@ class DensePoseHead(nn.Module):
 
         features_list = [pixel_embed]
 
-        densepose_predictor_outputs = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy"])
+        indices = None
+        indices_o2m = None
+        # If we have indices for matched boxes, only use those in densepose head
+        if "indices" in out.keys():
+            indices = out["indices"]
+        densepose_predictor_outputs = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy"], indices)
+
         densepose_predictor_outputs_o2m = None
         if "pred_boxes_xyxy_o2m" in out.keys():
-            densepose_predictor_outputs_o2m = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy_o2m"])
+            # If we have indices for matched o2m boxes, only use those in densepose head
+            if "indices_o2m" in out.keys():
+                indices_o2m = out["indices_o2m"]
+            densepose_predictor_outputs_o2m = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy_o2m"], indices_o2m)
 
-
-        # densepose_inference(densepose_predictor_outputs, instances)
         return densepose_predictor_outputs, densepose_predictor_outputs_o2m

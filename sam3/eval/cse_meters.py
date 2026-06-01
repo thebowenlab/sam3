@@ -226,7 +226,7 @@ class CSEPerPointGPSMeter:
                 self._ground_truths.append({
                     "image_id": targets["img_id"][i],
                     "bbox": box_cxcywh_to_xywh(targets["boxes"][i].cpu()),
-                    "dp_vertex": torch.tensor(targets["dp_vertex"][i], dtype=torch.int),
+                    "dp_vertex": targets["dp_vertex"][i].cpu(),
                     "dp_x": targets["dp_x"][i].cpu(),
                     "dp_y": targets["dp_y"][i].cpu(),
                     "mesh_name": targets["ref_model"][i],
