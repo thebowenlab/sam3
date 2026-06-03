@@ -88,7 +88,7 @@ class PerPointGPSEvaluator:
         """
         self.default_sigma = default_sigma
         self.out_dir=out_dir
-        self.out_file_name = "GPS_matched_predictions.pkl" if use_gpsm else "GPSM_matched_predictions.pkl"
+        self.out_file_name = "GPSM_matched_predictions.pkl" if use_gpsm else "GPS_matched_predictions.pkl"
         self.use_gpsm = use_gpsm
 
     @torch.no_grad()
