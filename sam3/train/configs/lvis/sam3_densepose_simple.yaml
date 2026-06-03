@@ -282,7 +282,7 @@ trainer:
   max_epochs: 100
   accelerator: cuda
   seed_value: 123
-  val_epoch_freq: 2
+  val_epoch_freq: 1
   mode: train
   gradient_accumulation_steps: ${scratch.gradient_accumulation_steps}
 
@@ -355,7 +355,8 @@ trainer:
     bpe_path: ${paths.bpe_path}
     device: cpus
     eval_mode: false
-    dp_init_path: /home/camposadmin/Documents/lvis/model_final_humans.pkl
+    dp_init_path: /home/camposadmin/Documents/lvis/model_final_humans_deeplab.pkl
+    use_deeplab_head: true
     enable_segmentation: ${scratch.enable_segmentation} # Warning: Enable this if using segmentation.
     cse_embedder:
       _target_: sam3.model.embedders.Embedder

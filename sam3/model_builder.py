@@ -65,8 +65,8 @@ def _setup_tf32() -> None:
 
 _setup_tf32()
 
-def _create_densepose_head():
-    return DensePoseHead()
+def _create_densepose_head(use_deeplab_head=False):
+    return DensePoseHead(use_deeplab_head=use_deeplab_head)
 
 def _create_position_encoding(precompute_resolution=None):
     """Create position encoding for visual backbone."""
@@ -706,6 +706,7 @@ def build_sam3_densepose_image_model(
     checkpoint_path=None,
     dp_init_path=None,
     load_from_HF=True,
+    use_deeplab_head=False,
     enable_segmentation=True,
     enable_inst_interactivity=False,
     compile=False,
@@ -759,7 +760,7 @@ def build_sam3_densepose_image_model(
     )
 
     # Create densepose head
-    densepose_head = _create_densepose_head()
+    densepose_head = _create_densepose_head(use_deeplab_head=use_deeplab_head)
 
     # Create geometry encoder
     input_geometry_encoder = _create_geometry_encoder()
@@ -784,28 +785,12 @@ def build_sam3_densepose_image_model(
     )
 
     # densepose head initialization from pretrained model (detectron2 framework)
-
+    # Parameter mappings that aren't just replacing "roi_heads" with "densepose_head"
     detectron_to_sam3 = {
-        "roi_heads.densepose_head.body_conv_fcn1.weight": "densepose_head.densepose_head.body_conv_fcn1.weight",
-        "roi_heads.densepose_head.body_conv_fcn1.bias": "densepose_head.densepose_head.body_conv_fcn1.bias",
-        "roi_heads.densepose_head.body_conv_fcn2.weight": "densepose_head.densepose_head.body_conv_fcn2.weight",
-        "roi_heads.densepose_head.body_conv_fcn2.bias": "densepose_head.densepose_head.body_conv_fcn2.bias",
-        "roi_heads.densepose_head.body_conv_fcn3.weight": "densepose_head.densepose_head.body_conv_fcn3.weight",
-        "roi_heads.densepose_head.body_conv_fcn3.bias": "densepose_head.densepose_head.body_conv_fcn3.bias",
-        "roi_heads.densepose_head.body_conv_fcn4.weight": "densepose_head.densepose_head.body_conv_fcn4.weight",
-        "roi_heads.densepose_head.body_conv_fcn4.bias": "densepose_head.densepose_head.body_conv_fcn4.bias",
-        "roi_heads.densepose_head.body_conv_fcn5.weight": "densepose_head.densepose_head.body_conv_fcn5.weight",
-        "roi_heads.densepose_head.body_conv_fcn5.bias": "densepose_head.densepose_head.body_conv_fcn5.bias",
-        "roi_heads.densepose_head.body_conv_fcn6.weight": "densepose_head.densepose_head.body_conv_fcn6.weight",
-        "roi_heads.densepose_head.body_conv_fcn6.bias": "densepose_head.densepose_head.body_conv_fcn6.bias",
-        "roi_heads.densepose_head.body_conv_fcn7.weight": "densepose_head.densepose_head.body_conv_fcn7.weight",
-        "roi_heads.densepose_head.body_conv_fcn7.bias": "densepose_head.densepose_head.body_conv_fcn7.bias",
-        "roi_heads.densepose_head.body_conv_fcn8.weight": "densepose_head.densepose_head.body_conv_fcn8.weight",
-        "roi_heads.densepose_head.body_conv_fcn8.bias": "densepose_head.densepose_head.body_conv_fcn8.bias",
         "roi_heads.densepose_predictor.embed_lowres.weight": "densepose_head.embed_lowres.weight",
         "roi_heads.densepose_predictor.embed_lowres.bias": "densepose_head.embed_lowres.bias",
         "roi_heads.embedder.embedder_smpl_27554.embeddings": "cse_embedder.embedder_smpl_27554.embeddings",
-        "roi_heads.embedder.embedder_smpl_27554.feature": "cse_embedder.embedder_smpl_27554.feature",
+        "roi_heads.embedder.embedder_smpl_27554.features": "cse_embedder.embedder_smpl_27554.features",
     }
 
     # updated = {}
@@ -824,13 +809,16 @@ def build_sam3_densepose_image_model(
                 state_dict = torch.load(hFile, map_location=torch.device("cpu"))
         if state_dict is not None and "model" in state_dict:
             state_dict_local = {}
-            for key in state_dict["model"]:
-                if key in detectron_to_sam3.keys():
-                    v_key = state_dict["model"][key]
+            for detr_key in state_dict["model"]:
+                sam3_key = detr_key.replace("roi_heads", "densepose_head")
+                if detr_key in detectron_to_sam3.keys():
+                    sam3_key = detectron_to_sam3[detr_key]
+                if sam3_key in model.state_dict().keys():
+                    v_key = state_dict["model"][detr_key]
                     if isinstance(v_key, np.ndarray):
                         v_key = torch.from_numpy(v_key)
-                    print(key, v_key.numel())
-                    state_dict_local[detectron_to_sam3[key]] = v_key
+                    print(sam3_key, v_key.numel())
+                    state_dict_local[sam3_key] = v_key
             # non-strict loading to finetune on different meshes
             model.load_state_dict(state_dict_local, strict=False)
 

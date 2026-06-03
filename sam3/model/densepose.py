@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
+import fvcore.nn.weight_init as weight_init
 from sam3.model.poolers import ROIPooler, Boxes
 
 from sam3.model.model_misc import (
@@ -97,6 +98,126 @@ class Conv2d(torch.nn.Conv2d):
             x = self.activation(x)
         return x
 
+class DensePoseDeepLabHead(nn.Module):
+    """
+    DensePose head using DeepLabV3 model from
+    "Rethinking Atrous Convolution for Semantic Image Segmentation"
+    <https://arxiv.org/abs/1706.05587>.
+    """
+
+    def __init__(self, input_channels: int):
+        super(DensePoseDeepLabHead, self).__init__()
+        # fmt: off
+        hidden_dim           = 512
+        kernel_size          = 3
+        norm                 = "GN"
+        self.n_stacked_convs = 8
+
+        # fmt: on
+        pad_size = kernel_size // 2
+        n_channels = input_channels
+
+        self.ASPP = ASPP(input_channels, [6, 12, 56], n_channels)  # 6, 12, 56
+        self.add_module("ASPP", self.ASPP)
+
+        for i in range(self.n_stacked_convs):
+            norm_module = nn.GroupNorm(32, hidden_dim) if norm == "GN" else None
+            layer = Conv2d(
+                n_channels,
+                hidden_dim,
+                kernel_size,
+                stride=1,
+                padding=pad_size,
+                bias=not norm,
+                norm=norm_module,
+            )
+            weight_init.c2_msra_fill(layer)
+            n_channels = hidden_dim
+            layer_name = self._get_layer_name(i)
+            self.add_module(layer_name, layer)
+        self.n_out_channels = hidden_dim
+        # initialize_module_params(self)
+
+    def forward(self, features):
+        x0 = features
+        x = self.ASPP(x0)
+        output = x
+        for i in range(self.n_stacked_convs):
+            layer_name = self._get_layer_name(i)
+            x = getattr(self, layer_name)(x)
+            x = F.relu(x)
+            output = x
+        return output
+
+    def _get_layer_name(self, i: int):
+        layer_name = "body_conv_fcn{}".format(i + 1)
+        return layer_name
+
+
+# Copied from
+# https://github.com/pytorch/vision/blob/master/torchvision/models/segmentation/deeplabv3.py
+# See https://arxiv.org/pdf/1706.05587.pdf for details
+class ASPPConv(nn.Sequential):
+    def __init__(self, in_channels, out_channels, dilation):
+        modules = [
+            nn.Conv2d(
+                in_channels, out_channels, 3, padding=dilation, dilation=dilation, bias=False
+            ),
+            nn.GroupNorm(32, out_channels),
+            nn.ReLU(),
+        ]
+        super(ASPPConv, self).__init__(*modules)
+
+
+class ASPPPooling(nn.Sequential):
+    def __init__(self, in_channels, out_channels):
+        super(ASPPPooling, self).__init__(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(in_channels, out_channels, 1, bias=False),
+            nn.GroupNorm(32, out_channels),
+            nn.ReLU(),
+        )
+
+    def forward(self, x):
+        size = x.shape[-2:]
+        x = super(ASPPPooling, self).forward(x)
+        return F.interpolate(x, size=size, mode="bilinear", align_corners=False)
+
+
+class ASPP(nn.Module):
+    def __init__(self, in_channels, atrous_rates, out_channels):
+        super(ASPP, self).__init__()
+        modules = []
+        modules.append(
+            nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, 1, bias=False),
+                nn.GroupNorm(32, out_channels),
+                nn.ReLU(),
+            )
+        )
+
+        rate1, rate2, rate3 = tuple(atrous_rates)
+        modules.append(ASPPConv(in_channels, out_channels, rate1))
+        modules.append(ASPPConv(in_channels, out_channels, rate2))
+        modules.append(ASPPConv(in_channels, out_channels, rate3))
+        modules.append(ASPPPooling(in_channels, out_channels))
+
+        self.convs = nn.ModuleList(modules)
+
+        self.project = nn.Sequential(
+            nn.Conv2d(5 * out_channels, out_channels, 1, bias=False),
+            # nn.BatchNorm2d(out_channels),
+            nn.ReLU(),
+            # nn.Dropout(0.5)
+        )
+
+    def forward(self, x):
+        res = []
+        for conv in self.convs:
+            res.append(conv(x))
+        res = torch.cat(res, dim=1)
+        return self.project(res)
+
 
 class DensePoseV1ConvXHead(nn.Module):
     """
@@ -159,6 +280,7 @@ class DensePoseHead(nn.Module):
         dp_head_conv_dim = 512,
         dp_embed_dim = 16,
         dp_deconv_kernel = 4,
+        use_deeplab_head = False,
         ):
         super().__init__()
         self.bb_channels = bb_channels
@@ -169,6 +291,7 @@ class DensePoseHead(nn.Module):
         self.dp_head_conv_dim = dp_head_conv_dim
         self.dp_embed_dim = dp_embed_dim
         self.dp_deconv_kernel = dp_deconv_kernel
+        self.use_deeplab_head = use_deeplab_head
         self._init_densepose_head()
 
     def _init_densepose_head(self):       
@@ -193,7 +316,10 @@ class DensePoseHead(nn.Module):
         )
         self.cross_attn_norm = nn.LayerNorm(256)
 
-        self.densepose_head = DensePoseV1ConvXHead(self.bb_channels)
+        if self.use_deeplab_head:
+            self.densepose_head = DensePoseDeepLabHead(self.bb_channels)
+        else:
+            self.densepose_head = DensePoseV1ConvXHead(self.bb_channels)
 
         self.embed_lowres = torch.nn.ConvTranspose2d(
             self.dp_head_conv_dim, self.dp_embed_dim, self.dp_deconv_kernel, stride=2, padding=int(self.dp_deconv_kernel / 2 - 1)
