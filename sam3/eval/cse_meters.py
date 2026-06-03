@@ -79,6 +79,12 @@ class CSEPerPointGPSMeter:
         self.gps_evaluator = PerPointGPSEvaluator(
             default_sigma=default_sigma,
             out_dir=out_dir,
+            use_gpsm=False,
+        )
+        self.gpsm_evaluator = PerPointGPSEvaluator(
+            default_sigma=default_sigma,
+            out_dir=out_dir,
+            use_gpsm=True,
         )
         self.detection_threshold = detection_threshold
         self.maxdets = maxdets
@@ -230,6 +236,7 @@ class CSEPerPointGPSMeter:
                     "dp_x": targets["dp_x"][i].cpu(),
                     "dp_y": targets["dp_y"][i].cpu(),
                     "mesh_name": targets["ref_model"][i],
+                    "mask": targets["masks"][i].cpu(),
                 })
 
 
@@ -249,11 +256,18 @@ class CSEPerPointGPSMeter:
         results = self.gps_evaluator.evaluate_dataset(
             self._predictions, self._ground_truths, self._mesh_embeddings
         )
+        results_gpsm = self.gpsm_evaluator.evaluate_dataset(
+            self._predictions, self._ground_truths, self._mesh_embeddings
+        )
         return {
             "AP_GPS": results["AP"],
             "AP50_GPS": results["AP50"],
             "AP75_GPS": results["AP75"],
             "AR_GPS": results["AR"],
+            "AP_GPSM": results_gpsm["AP"],
+            "AP50_GPSM": results_gpsm["AP50"],
+            "AP75_GPSM": results_gpsm["AP75"],
+            "AR_GPSM": results_gpsm["AR"],
         }
     def compute(self):
         """

@@ -41,6 +41,16 @@ def find_closest_vertices(
     edm = squared_euclidean_distance_matrix(pixel_embeddings, mesh_vertex_embeddings)
     return edm.argmin(dim=1)
 
+def mask_iou(
+    pred_mask: torch.Tensor,
+    gt_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Returns IoU of predicted and gt mask.
+    """
+    return (pred_mask & gt_mask).sum() / (pred_mask | gt_mask).sum()
+
+
 
 # ============================================================================
 # Metric 1: Per-Point GPS (OGPS) — per-instance, per-image
@@ -67,6 +77,7 @@ class PerPointGPSEvaluator:
         self,
         default_sigma: float = 0.255,
         out_dir: str = None,
+        use_gpsm: bool = False,
     ):
         """
         Args:
@@ -77,6 +88,8 @@ class PerPointGPSEvaluator:
         """
         self.default_sigma = default_sigma
         self.out_dir=out_dir
+        self.out_file_name = "GPS_matched_predictions.pkl" if use_gpsm else "GPSM_matched_predictions.pkl"
+        self.use_gpsm = use_gpsm
 
     @torch.no_grad()
     def compute_ogps_for_instance(
@@ -89,6 +102,7 @@ class PerPointGPSEvaluator:
         gt_points_x: torch.Tensor,
         gt_points_y: torch.Tensor,
         gt_bbox_xywh: torch.Tensor,
+        gt_mask: torch.Tensor,
         mesh_embedding: torch.Tensor,
         sigma: Optional[np.ndarray] = None,
     ) -> float:
@@ -179,7 +193,18 @@ class PerPointGPSEvaluator:
         # Compute GPS: exp(-d² / 2σ²)
         gps_values = torch.exp(-(dists ** 2) / (2 * self.default_sigma ** 2))
 
-        return gps_values.mean().item() if len(gps_values) > 0 else 0.0
+        gps = gps_values.mean().item() if len(gps_values) > 0 else 0.0
+
+        if self.use_gpsm:
+            resized_gt_mask = F.interpolate(
+                gt_mask.unsqueeze(0).unsqueeze(0).float(),
+                pred_mask.shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0).squeeze(0).bool()
+            gps = (gps * mask_iou(pred_mask, resized_gt_mask)) ** .5
+        
+        return gps
 
     @torch.no_grad()
     def evaluate_dataset(
@@ -257,6 +282,7 @@ class PerPointGPSEvaluator:
                             gt_points_x=gt["dp_x"],
                             gt_points_y=gt["dp_y"],
                             gt_bbox_xywh=gt["bbox"],
+                            gt_mask=gt["mask"],
                             mesh_embedding=mesh_embeddings[gt["mesh_name"]],
                         )
                 # Greedy matching per detection (sorted by score desc)
@@ -341,42 +367,10 @@ class PerPointGPSEvaluator:
             data = {}
             data["predictions"] = matched_preds
             data["mesh_embeddings"] = mesh_embeddings
-            with open(os.path.join(self.out_dir, "matched_predictions.pkl"), 'wb') as f:
+            with open(os.path.join(self.out_dir, self.out_file_name), 'wb') as f:
                 pickle.dump(data, f)
 
         return results
-
-# ============================================================================
-# Metric 1b: GPSm — GPS × mask IoU (geometric mean)
-# ============================================================================
-
-class GPSmEvaluator(PerPointGPSEvaluator):
-    """
-    GPSm = sqrt(GPS × mask_IoU).
-
-    Extends PerPointGPSEvaluator to also compute mask IoU between predicted
-    and GT segmentation masks, then uses the geometric mean as the matching
-    score for COCO AP.
-
-    To use this, predictions must also contain a "segmentation_mask" key
-    (binary mask on the full image), and ground_truths must contain "segmentation_mask".
-    """
-
-    def compute_gpsm_for_instance(
-        self, ogps: float, pred_mask: np.ndarray, gt_mask: np.ndarray
-    ) -> float:
-        """
-        Args:
-            ogps: OGPS score from PerPointGPSEvaluator
-            pred_mask: [H, W] binary prediction mask
-            gt_mask: [H, W] binary GT mask
-        Returns:
-            GPSm = sqrt(OGPS × IoU)
-        """
-        intersection = np.logical_and(pred_mask, gt_mask).sum()
-        union = np.logical_or(pred_mask, gt_mask).sum()
-        iou = intersection / max(union, 1)
-        return float(np.sqrt(ogps * iou))
 
 
 # ============================================================================
