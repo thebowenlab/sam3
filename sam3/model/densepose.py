@@ -4,6 +4,7 @@ from functools import partial
 from typing import Callable, List, Optional, Tuple, Union, Dict
 from dataclasses import dataclass
 from sam3.model.maskformer_segmentation import PixelDecoder
+from sam3.model.focal_block import FocalModulationBlock
 
 
 import torch
@@ -302,6 +303,12 @@ class DensePoseHead(nn.Module):
             hidden_dim=self.bb_channels,
         )
 
+        self.focal_block =  FocalModulationBlock(
+                    channels=self.bb_channels,
+                    focal_levels=3,
+                    focal_windows=[3,5,7],
+                )
+
         self.densepose_pooler = ROIPooler(
             output_size=self.dp_pooler_resolution,
             scales=[self.bb_scales],
@@ -374,6 +381,10 @@ class DensePoseHead(nn.Module):
 
         backbone_visual_feats[-1] = encoder_visual_embed
         pixel_embed = self.decoder(backbone_visual_feats)
+
+
+        # Focal mod block after decoder.
+        pixel_embed = self.focal_block(pixel_embed)
 
 
         features_list = [pixel_embed]
