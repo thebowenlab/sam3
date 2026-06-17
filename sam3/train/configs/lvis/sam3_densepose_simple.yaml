@@ -455,7 +455,7 @@ trainer:
           pred_file_evaluators:
             - _target_: sam3.eval.coco_eval_offline.CocoEvaluatorOfflineWithPredFileEvaluators
               # gt_path: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1_filtered_giraffe_has_cse.json
-              gt_path: /home/camposadmin/Documents/lvis/densepose_minival2014_cse.json
+              gt_path: ${trainer.data.val.dataset.ann_file}
               tide: False
               iou_type: "segm"
         # Mesh alignment (cross-mesh embedding quality)
