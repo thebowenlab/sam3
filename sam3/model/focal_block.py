@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 
-
+# Implementation of focal modulation blocks from https://arxiv.org/pdf/2203.11926
 
 class FocalModulationBlock(nn.Module):
     """
@@ -69,6 +69,6 @@ class FocalModulationBlock(nn.Module):
         x_out = self.proj(x_out)
         x_out = self.proj_drop(x_out)
 
-        # Reshape back to (B, C, H, W) and residual
+        # Reshape back to (B, C, H, W) and add residual
         x_out = x_out.permute(0, 3, 1, 2)
         return x_out + residual

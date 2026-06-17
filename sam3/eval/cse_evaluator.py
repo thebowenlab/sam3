@@ -85,6 +85,7 @@ class PerPointGPSEvaluator:
             default_sigma: normalization constant σ for GPS.
                 DensePose uses per-body-part sigmas for SMPL (0.107–0.351)
                 and 0.255 as default for non-SMPL meshes.
+            use_gpsm: whether or not to calculate gpsm instead of gps.
         """
         self.default_sigma = default_sigma
         self.out_dir=out_dir
@@ -111,11 +112,15 @@ class PerPointGPSEvaluator:
 
         Args:
             pred_embedding: [D, S, S] predicted embedding feature map for this instance
-            pred_coarse_segm: [C, S, S] coarse segmentation (C=2 for fg/bg)
-            bbox_xywh: (x, y, w, h) absolute bbox of the detection
+            pred_mask: [H, W] mask of the predictions
+            pred_bbox_xywh: (x, y, w, h) absolute bbox coords of the detection
             gt_vertex_ids: [P] GT mesh vertex IDs for each annotated point (0-based)
             mesh_name: which mesh this instance uses (e.g. "smpl_27554")
-            gt_points_xy: [P, 2] absolute (x, y) coords of GT annotated points
+            gt_points_x: [P] pixel x coords of the gt vertex within the bbox scaled [0,256]
+            gt_points_y: [P] pixel y coords of the gt vertex within the bbox scaled [0,256]
+            gt_bbox_xywh: (x, y, w, h) bbox of the detection scaled from [0,1]
+            gt_mask: [maskH, maskW] gt mask scaled to model output mask resolution
+            mesh_embedding: embeddings of vertices of mesh corresponding to this detection
             sigma: [P] per-point normalization constants. If None, uses self.default_sigma.
 
         Returns:
@@ -372,122 +377,3 @@ class PerPointGPSEvaluator:
 
         return results
 
-
-# ============================================================================
-# Metric 2: Cross-Mesh Alignment GPS
-# ============================================================================
-
-class MeshAlignmentEvaluator:
-    """
-    Evaluates whether the shared embedding space correctly aligns
-    semantically corresponding vertices across different meshes.
-
-    Directly mirrors DensePose's MeshAlignmentEvaluator.
-
-    For each pair of meshes (A, B):
-      1. Take keyvertices on mesh A (anatomical landmarks like "nose", "left_ear")
-      2. Get their embeddings from the embedder
-      3. Find the most similar vertex on mesh B by dot-product
-      4. Measure geodesic distance on mesh B between the matched vertex
-         and the true corresponding keyvertex on mesh B
-      5. Convert to GPS: exp(-d² / 2σ²) with σ=0.255
-
-    Requires a keyvertex mapping JSON (e.g. mesh_keyvertices_v0.json from DensePose).
-    """
-
-    DEFAULT_SIGMA = 0.255
-
-    def __init__(
-        self,
-        embedder: nn.Module,
-        mesh_keyvertices: Dict[str, Dict[str, int]],
-        mesh_names: Optional[List[str]] = None,
-    ):
-        """
-        Args:
-            embedder: CSEEmbedder that maps mesh_name -> [K, D]
-            mesh_keyvertices: dict mapping mesh_name -> {landmark_name: vertex_index}.
-                Download from: https://dl.fbaipublicfiles.com/densepose/data/cse/mesh_keyvertices_v0.json
-            mesh_names: which meshes to evaluate. If None, uses all from embedder.
-        """
-        self.embedder = embedder
-        self.mesh_keyvertices = mesh_keyvertices
-        self.mesh_names = mesh_names if mesh_names else list(embedder.mesh_names)
-
-    @torch.no_grad()
-    def evaluate(self) -> Dict[str, Dict]:
-        """
-        Returns:
-            {
-                "GE_mean": float,           # mean geodesic error (lower is better)
-                "GPS_mean": float,           # mean GPS (higher is better)
-                "per_mesh": {
-                    mesh_name: {"GE": float, "GPS": float},
-                    ...
-                }
-            }
-        """
-        ge_per_mesh = {}
-        gps_per_mesh = {}
-
-        for mesh_name_1 in self.mesh_names:
-            avg_errors = []
-            avg_gps = []
-
-            embeddings_1 = self.embedder(mesh_name_1)  # [K1, D]
-            keyvertices_1 = self.mesh_keyvertices.get(mesh_name_1, {})
-            if not keyvertices_1:
-                continue
-            keyvertex_names_1 = list(keyvertices_1.keys())
-            keyvertex_indices_1 = [keyvertices_1[name] for name in keyvertex_names_1]
-
-            for mesh_name_2 in self.mesh_names:
-                if mesh_name_1 == mesh_name_2:
-                    continue
-
-                embeddings_2 = self.embedder(mesh_name_2)  # [K2, D]
-                keyvertices_2 = self.mesh_keyvertices.get(mesh_name_2, {})
-                if not keyvertices_2:
-                    continue
-
-                # Similarity: embeddings of keyvertices on mesh1 vs ALL vertices on mesh2
-                # [n_keyvertices, D] @ [D, K2] -> [n_keyvertices, K2]
-                sim_matrix_12 = embeddings_1[keyvertex_indices_1].mm(embeddings_2.T)
-
-                # For each keyvertex on mesh1, find the best-matching vertex on mesh2
-                matched_vertices_on_2 = sim_matrix_12.argmax(dim=1)  # [n_keyvertices]
-
-                # True corresponding keyvertices on mesh2
-                true_vertices_on_2 = torch.tensor(
-                    [keyvertices_2[name] for name in keyvertex_names_1],
-                    dtype=torch.long,
-                )
-
-                # Geodesic distance on mesh2 between matched and true vertices
-                mesh_2 = create_mesh(mesh_name_2, device=embeddings_2.device)
-                geodists = mesh_2.geodists[
-                    matched_vertices_on_2.cpu(), true_vertices_on_2
-                ]  # [n_keyvertices]
-
-                # GPS = exp(-d² / 2σ²)
-                sigma = self.DEFAULT_SIGMA
-                gps = torch.exp(-(geodists ** 2) / (2 * sigma ** 2))
-
-                avg_errors.append(geodists.mean().item())
-                avg_gps.append(gps.mean().item())
-
-            if avg_errors:
-                ge_per_mesh[mesh_name_1] = float(torch.tensor(avg_errors).mean())
-                gps_per_mesh[mesh_name_1] = float(torch.tensor(avg_gps).mean())
-
-        ge_mean = float(torch.tensor(list(ge_per_mesh.values())).mean()) if ge_per_mesh else 0.0
-        gps_mean = float(torch.tensor(list(gps_per_mesh.values())).mean()) if gps_per_mesh else 0.0
-
-        return {
-            "GE_mean": ge_mean,
-            "GPS_mean": gps_mean,
-            "per_mesh": {
-                name: {"GE": ge_per_mesh.get(name, 0), "GPS": gps_per_mesh.get(name, 0)}
-                for name in self.mesh_names
-            },
-        }

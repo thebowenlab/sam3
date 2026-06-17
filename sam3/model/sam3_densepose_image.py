@@ -149,6 +149,8 @@ class Sam3DensePoseImage(Sam3Image):
         return out
 
     def _compute_matching(self, out, targets):
+        # Compute matching and o2m matching so we can filter specific predictions
+        # in the densepose head to save compute.
         out["indices"] = self.matcher(out, targets)
         o2m_dict = {"pred_logits": out["pred_logits_o2m"],
                     "pred_boxes": out["pred_boxes_o2m"]}

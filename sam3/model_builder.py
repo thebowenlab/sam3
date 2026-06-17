@@ -352,6 +352,7 @@ def _create_sam3_densepose_model(
     eval_mode,
     matcher,
     o2m_matcher,
+    unfrozen_prefixes,
 ):
     """Create the SAM3 image model."""
     common_params = {
@@ -378,13 +379,15 @@ def _create_sam3_densepose_model(
 
 
 
+    for name, param in model.named_parameters():
+        param.requires_grad = False
 
     # For freezing different parts
     for name, param in model.named_parameters():
-        # if name.startswith("backbone") or name.startswith("cse_embedder"):
-        # if not name.startswith("densepose_head") and not name.startswith("cse_embedder"):
-        if not name.startswith("densepose_head.decoder") and not name.startswith("densepose_head.cross_att"):
-            param.requires_grad = False
+        for param_prefix in unfrozen_prefixes:
+            if name.startswith(param_prefix):
+                param.requires_grad = True
+                break
 
     return model
 
@@ -704,10 +707,12 @@ def build_sam3_densepose_image_model(
     device="cuda" if torch.cuda.is_available() else "cpu",
     eval_mode=True,
     checkpoint_path=None,
+    model_init_path=None,
     dp_init_path=None,
     load_from_HF=True,
     use_deeplab_head=False,
     enable_segmentation=True,
+    unfrozen_prefixes=[],
     enable_inst_interactivity=False,
     compile=False,
     cse_embedder=None,
@@ -782,6 +787,7 @@ def build_sam3_densepose_image_model(
         eval_mode,
         matcher,
         o2m_matcher,
+        unfrozen_prefixes,
     )
 
     # densepose head initialization from pretrained model (detectron2 framework)
@@ -831,6 +837,22 @@ def build_sam3_densepose_image_model(
     # Load checkpoint if provided
     if checkpoint_path is not None:
         _load_checkpoint(model, checkpoint_path)
+
+
+    # Loading weights from models even if they don't have same param groups etc
+    if model_init_path is not None:
+        with g_pathmgr.open(model_init_path, "rb") as f:
+            ckpt = torch.load(f, map_location="cpu", weights_only=True)
+        if "model" in ckpt and isinstance(ckpt["model"], dict):
+            ckpt = ckpt["model"]
+        missing_keys, _ = model.load_state_dict(ckpt, strict=False)
+        if len(missing_keys) > 0:
+            print(
+                f"loaded {checkpoint_path} and found "
+                f"missing and/or unexpected keys:\n{missing_keys=}"
+            )
+
+
 
     # Setup device and mode
     model = _setup_device_and_mode(model, device, eval_mode)

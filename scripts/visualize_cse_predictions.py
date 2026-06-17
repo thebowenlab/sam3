@@ -6,8 +6,7 @@ Usage:
         --predictions predictions.pkl \
         --images_dir /path/to/images \
         --output_dir /path/to/output \
-        --mesh_name smpl_27554 \
-        --embedder_path /path/to/embedder.pt
+        --lbo_dir /path/to/lbo/folder 
 """
 
 import argparse
@@ -37,6 +36,7 @@ def get_vertex_colors_from_embeddings(
     Returns: [K, 3] tensor of floats in [0, 1].
     """
 
+    # If using the smpl human mesh, load the mapping directly
     if mesh_name == "smpl_27554":
         embed_map, _ = np.load("/home/camposadmin/Documents/lvis/mds_d=256.npy", allow_pickle=True)
         embed_map = torch.tensor(embed_map).float()[:, 0]
@@ -102,11 +102,6 @@ def visualize_instance(
     if w <= 0 or h <= 0:
         return image_bgr
 
-    # embedding = pred_embedding / torch.clamp(pred_embedding.norm(p=None, dim=0, keepdim=True), min=1e-6)
-    # pred_embedding = embedding
-
-    # print(pred_embedding[:, 0, 0])
-    # print(mesh_vertex_embs[0])
 
     img_h, img_w = image_bgr.shape[:2]
     # print(x,y,w,h)
@@ -206,7 +201,6 @@ def main():
     parser.add_argument("--lbo_dir", required=True, help="Directory containing init LBO feats")
     parser.add_argument("--output_dir", required=True, help="Directory to save visualizations")
     parser.add_argument("--alpha", type=float, default=0.7, help="Overlay transparency")
-    parser.add_argument("--score_thresh", type=float, default=0.5, help="Min detection score")
     parser.add_argument("--device", default="cuda", help="Device")
     args = parser.parse_args()
 

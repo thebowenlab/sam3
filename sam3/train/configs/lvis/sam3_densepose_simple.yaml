@@ -6,7 +6,6 @@ defaults:
 # Paths Configuration (Chage this to your own paths)
 # ============================================================================
 paths:
-  lvis_root: "/home/camposadmin/detectron2/projects/DensePose/datasets"
   experiment_log_dir: "./log_dir/"
   bpe_path: "./sam3/assets/bpe_simple_vocab_16e6.txt.gz" # This should be under sam3/assets/bpe_simple_vocab_16e6.txt.gz
 
@@ -112,30 +111,30 @@ lvis_train:
     o2m_matcher: ${scratch.o2m_matcher}
     use_o2m_matcher_on_o2m_aux: false
     loss_fns_find:
-      # - _target_: sam3.train.loss.loss_fns.Boxes
-      #   weight_dict:
-      #     loss_bbox: .50
-      #     loss_giou: .20
-      # - _target_: sam3.train.loss.loss_fns.IABCEMdetr
-      #   weak_loss: False
-      #   weight_dict:
-      #     loss_ce: 2.0 # Another option is 100.0
-      #     presence_loss: 2.0
-      #   pos_weight: 5.0 # Another option is 5.0
-      #   alpha: 0.25
-      #   gamma: 2
-      #   presence_gamma: 2
-      #   use_presence: True  # Change
-      #   pos_focal: false
-      #   pad_n_queries: 200
-      #   pad_scale_pos: 1.0
-      # - _target_: sam3.train.loss.loss_fns.Masks
-      #   focal_alpha: 0.25
-      #   focal_gamma: 2.0
-      #   weight_dict:
-      #     loss_mask: 200.0
-      #     loss_dice: 10.0
-      #   compute_aux: false
+      - _target_: sam3.train.loss.loss_fns.Boxes
+        weight_dict:
+          loss_bbox: .50
+          loss_giou: .20
+      - _target_: sam3.train.loss.loss_fns.IABCEMdetr
+        weak_loss: False
+        weight_dict:
+          loss_ce: 2.0 # Another option is 100.0
+          presence_loss: 2.0
+        pos_weight: 5.0 # Another option is 5.0
+        alpha: 0.25
+        gamma: 2
+        presence_gamma: 2
+        use_presence: True  # Change
+        pos_focal: false
+        pad_n_queries: 200
+        pad_scale_pos: 1.0
+      - _target_: sam3.train.loss.loss_fns.Masks
+        focal_alpha: 0.25
+        focal_gamma: 2.0
+        weight_dict:
+          loss_mask: 200.0
+          loss_dice: 10.0
+        compute_aux: false
       - _target_: sam3.train.loss.cse_soft_embed_loss.CSESoftEmbeddingLoss
         weight_dict:
           loss_cse_embed: 0.6     # tune this weight
@@ -152,18 +151,18 @@ lvis_train:
         pix_sigma: 5.0
         temp_pix_to_vertex: .05
         temp_vertex_to_pix: .05
-    # loss_fn_semantic_seg:
-    #   _target_: sam3.train.loss.loss_fns.SemanticSegCriterion
-    #   presence_head: True
-    #   presence_loss: False  # Change
-    #   focal: True
-    #   focal_alpha: 0.6
-    #   focal_gamma: 2.0
-    #   downsample: False
-    #   weight_dict:
-    #     loss_semantic_seg: 20.0
-    #     loss_semantic_presence: 1.0
-    #     loss_semantic_dice: 30.0
+    loss_fn_semantic_seg:
+      _target_: sam3.train.loss.loss_fns.SemanticSegCriterion
+      presence_head: True
+      presence_loss: False  # Change
+      focal: True
+      focal_alpha: 0.6
+      focal_gamma: 2.0
+      downsample: False
+      weight_dict:
+        loss_semantic_seg: 20.0
+        loss_semantic_presence: 1.0
+        loss_semantic_dice: 30.0
     scale_by_find_batch_size: ${scratch.scale_by_find_batch_size}
 
 # ============================================================================
@@ -239,7 +238,7 @@ scratch:
 
   # Learning rate and scheduler parameters
   lr_scale: .1
-  lr_transformer: ${times:8e-4,${scratch.lr_scale}}
+  lr_transformer: ${times:8e-2,${scratch.lr_scale}}
   lr_vision_backbone: ${times:2.5e-4,${scratch.lr_scale}}
   lr_language_backbone: ${times:5e-5,${scratch.lr_scale}}
   lr_densepose_head: .01
@@ -259,13 +258,13 @@ scratch:
     dict_key: lvis
     with_seg_masks: ${scratch.enable_segmentation} # Note: Set this to true if using segmentation masks!
 
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 2
   train_batch_size: 16
   collate_fn:
-    _target_: sam3.train.data.collator.collate_fn_api
+    _target_: sam3.train.data.collator.collate_fn_api_with_chunking
     _partial_: true
     repeats: ${scratch.hybrid_repeats}
-    # num_chunks: 2
+    num_chunks: 2
     dict_key: all
     with_seg_masks: ${scratch.enable_segmentation} # Note: Set this to true if using segmentation masks!
 
@@ -279,7 +278,7 @@ trainer:
   skip_saving_ckpts: False
   empty_gpu_mem_cache_after_eval: True
   skip_first_val: False
-  max_epochs: 100
+  max_epochs: 20
   accelerator: cuda
   seed_value: 123
   val_epoch_freq: 1
@@ -355,9 +354,16 @@ trainer:
     bpe_path: ${paths.bpe_path}
     device: cpus
     eval_mode: false
+    model_init_path: '/home/camposadmin/Documents/experiments/deeplab head no modulation human only/deeplab head dphead + cseembed unfrozen after encoder tuned/checkpoints/checkpoint.pt'
     dp_init_path: /home/camposadmin/Documents/lvis/model_final_humans_deeplab.pkl
     use_deeplab_head: true
     enable_segmentation: ${scratch.enable_segmentation} # Warning: Enable this if using segmentation.
+    unfrozen_prefixes: # Any model params with these prefixes will be unfrozen, and everything else frozen
+      - "densepose_head" # used for predicting densepose embeddings
+      - "cse_embedder" # used for embedding mesh vertices
+      - "segmentation_head" # used for segmentation masks
+      - "dot_prod_scoring" # used for bbox
+      - "transformer.decoder.bbox_embed" # used for bbox
     cse_embedder:
       _target_: sam3.model.embedders.Embedder
       embed_dim: 16

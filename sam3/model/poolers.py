@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Largely adapted or taken from Detectron2 framework: https://github.com/facebookresearch/detectron2/tree/main
 import math
 from typing import List, Optional
 import torch

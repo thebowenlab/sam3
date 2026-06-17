@@ -1,3 +1,5 @@
+# Largely adapted or taken from Detectron2 framework: https://github.com/facebookresearch/detectron2/tree/main
+
 from typing import Dict, List, Optional, Set
 import torch
 import torch.nn as nn

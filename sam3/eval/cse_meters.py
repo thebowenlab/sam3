@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 
 from sam3.eval.cse_evaluator import (
-    MeshAlignmentEvaluator,
     PerPointGPSEvaluator,
 )
 
@@ -19,55 +18,6 @@ from sam3.model.box_ops import box_cxcywh_to_xywh
 
 
 logger = logging.getLogger(__name__)
-
-
-class CSEMeshAlignmentMeter:
-    """
-    Meter for cross-mesh alignment GPS.
-    This only depends on the embedder weights (not on predictions),
-    so it's computed once at validation end.
-    """
-
-    def __init__(
-        self,
-        embedder: nn.Module,
-        mesh_keyvertices_path: str,
-        mesh_names: Optional[List[str]] = None,
-    ):
-        with open(mesh_keyvertices_path, "r") as f:
-            mesh_keyvertices = json.load(f)
-        self.evaluator = MeshAlignmentEvaluator(
-            embedder=embedder,
-            mesh_keyvertices=mesh_keyvertices,
-            mesh_names=mesh_names,
-        )
-
-    def reset(self):
-        pass  # stateless — depends only on embedder weights
-
-    def update(self, **kwargs):
-        pass  # nothing to accumulate per-batch
-
-    def compute_synced(self) -> Dict[str, float]:
-        results = self.evaluator.evaluate()
-        return {
-            "GE": results["GE_mean"],
-            "GPS": results["GPS_mean"],
-        }
-
-    @staticmethod
-    def is_better(new_val, old_val):
-        """Higher GPS is better."""
-        return new_val > old_val
-    def compute(self):
-        """
-        Compute without synchronization.
-
-        Returns:
-            Empty metric dictionary.
-        """
-        return {"": 0.0}
-
 
 class CSEPerPointGPSMeter:
     """
@@ -171,9 +121,6 @@ class CSEPerPointGPSMeter:
                 )
                 interpolated = interpolated.to(mask_device)
 
-            # if self.convert_mask_to_rle:
-            #     out_masks[i] = robust_rle_encode(interpolated.squeeze(1))
-            # else:
             out_masks[i] = interpolated
             out_masks[i] = out_masks[i].cpu()
         return out_masks
@@ -209,7 +156,7 @@ class CSEPerPointGPSMeter:
             if mesh_name not in self._mesh_embeddings.keys():
                 self._mesh_embeddings[mesh_name] = outputs["mesh_embeddings"][mesh_name].cpu()
 
-        # go batch by batch, add only samples that have smth
+        # go batch by batch, add only samples that have detections
         for i in range(len(keep)):
             img_ids = metadata.original_image_id[i]
             predictions_per_batch = keep.shape[1]

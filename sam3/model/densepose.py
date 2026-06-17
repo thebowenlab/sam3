@@ -1,4 +1,4 @@
-# All code here adapted or taken from Detectron2 framework: https://github.com/facebookresearch/detectron2/tree/b599f139756bd3646a26a909caf86a1a159e53a7 
+# Largely adapted or taken from Detectron2 framework: https://github.com/facebookresearch/detectron2/tree/main
 import math
 from functools import partial
 from typing import Callable, List, Optional, Tuple, Union, Dict
@@ -37,18 +37,6 @@ def convert_prediction_boxes(pred_boxes, indices=None):
 
     return [Boxes(pred_boxes[i]) for i in range(pred_boxes.shape[0])]
 
-@dataclass
-class ShapeSpec:
-    """
-    A simple structure that contains basic shape specification about a tensor.
-    It is often used as the auxiliary inputs/outputs of models,
-    to complement the lack of shape inference ability among pytorch modules.
-    """
-
-    channels: Optional[int] = None
-    height: Optional[int] = None
-    width: Optional[int] = None
-    stride: Optional[int] = None
 
 class Conv2d(torch.nn.Conv2d):
     """
@@ -120,6 +108,7 @@ class DensePoseDeepLabHead(nn.Module):
 
         self.ASPP = ASPP(input_channels, [6, 12, 56], n_channels)  # 6, 12, 56
         self.add_module("ASPP", self.ASPP)
+        self.focal_blocks = []
 
         for i in range(self.n_stacked_convs):
             norm_module = nn.GroupNorm(32, hidden_dim) if norm == "GN" else None
@@ -136,6 +125,14 @@ class DensePoseDeepLabHead(nn.Module):
             n_channels = hidden_dim
             layer_name = self._get_layer_name(i)
             self.add_module(layer_name, layer)
+            if i % 2 == 1:
+                focal_block = FocalModulationBlock(
+                            channels= hidden_dim,
+                            focal_levels=3,
+                            focal_windows=[3,5,7],
+                )
+                self.focal_blocks.append(focal_block)
+        self.focal_blocks = nn.ModuleList(self.focal_blocks)
         self.n_out_channels = hidden_dim
         # initialize_module_params(self)
 
@@ -147,6 +144,8 @@ class DensePoseDeepLabHead(nn.Module):
             layer_name = self._get_layer_name(i)
             x = getattr(self, layer_name)(x)
             x = F.relu(x)
+            if i % 2 == 1:
+                x = self.focal_blocks[i//2](x)
             output = x
         return output
 
@@ -303,11 +302,6 @@ class DensePoseHead(nn.Module):
             hidden_dim=self.bb_channels,
         )
 
-        self.focal_block =  FocalModulationBlock(
-                    channels=self.bb_channels,
-                    focal_levels=3,
-                    focal_windows=[3,5,7],
-                )
 
         self.densepose_pooler = ROIPooler(
             output_size=self.dp_pooler_resolution,
@@ -352,7 +346,7 @@ class DensePoseHead(nn.Module):
     def forward(self, out, backbone_out, image_ids, encoder_hidden_states, prompt, prompt_mask):
         backbone_feats = backbone_out["backbone_fpn"]
 
-
+        # Leverage encoder hidden states in a similar way that the segmentation head does.
         if self.cross_attend_prompt is not None:
             tgt2 = self.cross_attn_norm(encoder_hidden_states)
             tgt2 = self.cross_attend_prompt(
@@ -382,16 +376,12 @@ class DensePoseHead(nn.Module):
         backbone_visual_feats[-1] = encoder_visual_embed
         pixel_embed = self.decoder(backbone_visual_feats)
 
-
-        # Focal mod block after decoder.
-        pixel_embed = self.focal_block(pixel_embed)
-
-
         features_list = [pixel_embed]
 
         indices = None
         indices_o2m = None
-        # If we have indices for matched boxes, only use those in densepose head
+
+        # If we have indices for matched boxes, only use those matches in densepose head
         if "indices" in out.keys():
             indices = out["indices"]
         densepose_predictor_outputs = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy"], indices)
