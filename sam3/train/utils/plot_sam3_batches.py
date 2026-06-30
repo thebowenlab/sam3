@@ -1,4 +1,7 @@
 """
+Adapted from Ultralytics
+https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/plotting.py
+
 Standalone batch visualization for SAM3 training data (sam3_densepose_head branch).
 
 Plots bounding boxes, segmentation masks, and DensePose ground truth points
