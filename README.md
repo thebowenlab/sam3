@@ -110,6 +110,15 @@ paths:
   bpe_path: "./sam3/assets/bpe_simple_vocab_16e6.txt.gz"
 ```
 
+By default, the first 5 batches with GT data are plotted and saved in the experiment logging directories. Modify the following if you want to change the default location/frequency.
+
+```yaml
+trainer:
+  logging:
+    vis_dir: path/to/desired/folder
+    num_vis_batches:
+```
+
 ### 9. Run Training
 
 ```bash
