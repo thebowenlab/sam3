@@ -113,14 +113,14 @@ lvis_train:
     loss_fns_find:
       - _target_: sam3.train.loss.loss_fns.Boxes
         weight_dict:
-          loss_bbox: .50
-          loss_giou: .20
+          loss_bbox: 5.0
+          loss_giou: 2.0
       - _target_: sam3.train.loss.loss_fns.IABCEMdetr
         weak_loss: False
         weight_dict:
-          loss_ce: 2.0 # Another option is 100.0
-          presence_loss: 2.0
-        pos_weight: 5.0 # Another option is 5.0
+          loss_ce: 20 # Another option is 100.0
+          presence_loss: 20
+        pos_weight: 10.0 # Another option is 5.0
         alpha: 0.25
         gamma: 2
         presence_gamma: 2
@@ -141,6 +141,10 @@ lvis_train:
         compute_aux: false
         embdist_gauss_sigma: 0.01 # temperature for embedding distances
         geodist_gauss_sigma: 0.01 # temperature for geodesic soft targets
+      - _target_: sam3.train.loss.coarse_segm_loss.SegmentationLoss
+        weight_dict:
+          loss_coarse_segm: 5.0
+        compute_aux: false
       - _target_: sam3.train.loss.pix2shape_loss.Pix2ShapeLoss
         weight_dict:
           loss_pix2shape_cycle: 0.0001     # tune this weight
@@ -278,7 +282,7 @@ trainer:
   skip_saving_ckpts: False
   empty_gpu_mem_cache_after_eval: True
   skip_first_val: False
-  max_epochs: 20
+  max_epochs: 40
   accelerator: cuda
   seed_value: 123
   val_epoch_freq: 1

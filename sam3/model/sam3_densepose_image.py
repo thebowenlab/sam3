@@ -70,7 +70,7 @@ class Sam3DensePoseImage(Sam3Image):
 
     def _run_densepose_head(self, out, backbone_out, img_ids, encoder_hidden_states, prompt, prompt_mask):
  
-        densepose_head_outputs, densepose_head_outputs_o2m = self.densepose_head(
+        densepose_head_outputs, densepose_head_outputs_o2m, segm_outputs, segm_outputs_o2m = self.densepose_head(
                 out=out,
                 backbone_out=backbone_out,
                 image_ids=img_ids,
@@ -80,6 +80,8 @@ class Sam3DensePoseImage(Sam3Image):
             )
         out["pred_embeddings"] = densepose_head_outputs
         out["pred_embeddings_o2m"] = densepose_head_outputs_o2m
+        out["pred_coarse_segm"] = segm_outputs
+        out["pred_coarse_segm_o2m"] = segm_outputs_o2m
         
 
     def forward_grounding(

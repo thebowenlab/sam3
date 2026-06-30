@@ -328,6 +328,12 @@ class DensePoseHead(nn.Module):
         nn.init.kaiming_normal_(self.embed_lowres.weight, mode="fan_out", nonlinearity="relu")
         nn.init.constant_(self.embed_lowres.bias, 0)
 
+        self.segm_lowres = torch.nn.ConvTranspose2d(
+            self.dp_head_conv_dim, 2, self.dp_deconv_kernel, stride=2, padding=int(self.dp_deconv_kernel / 2 - 1)
+        )
+        nn.init.kaiming_normal_(self.segm_lowres.weight, mode="fan_out", nonlinearity="relu")
+        nn.init.constant_(self.segm_lowres.bias, 0)
+
     def compute_densepose_outputs(self, features_list, output_boxes_xyxy, indices=None):
         pred_boxes = convert_prediction_boxes(output_boxes_xyxy, indices)
         features_dp = self.densepose_pooler(features_list, pred_boxes)
@@ -335,12 +341,16 @@ class DensePoseHead(nn.Module):
             densepose_head_outputs = self.densepose_head(features_dp)
 
             #transposed conv
-            densepose_head_outputs = self.embed_lowres(densepose_head_outputs)
-            densepose_head_outputs = F.interpolate(densepose_head_outputs, scale_factor=2, mode="bilinear", align_corners=False)
+            densepose_embed_outputs = self.embed_lowres(densepose_head_outputs)
+            densepose_embed_outputs = F.interpolate(densepose_embed_outputs, scale_factor=2, mode="bilinear", align_corners=False)
+
+            segm_outputs = self.segm_lowres(densepose_head_outputs)
+            segm_outputs = F.interpolate(segm_outputs, scale_factor=2, mode="bilinear", align_corners=False)
 
         else:
-            densepose_head_outputs = None
-        return densepose_head_outputs
+            densepose_embed_outputs = None
+            segm_outputs = None
+        return densepose_embed_outputs, segm_outputs
 
 
     def forward(self, out, backbone_out, image_ids, encoder_hidden_states, prompt, prompt_mask):
@@ -384,13 +394,14 @@ class DensePoseHead(nn.Module):
         # If we have indices for matched boxes, only use those matches in densepose head
         if "indices" in out.keys():
             indices = out["indices"]
-        densepose_predictor_outputs = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy"], indices)
+        densepose_predictor_outputs, segm_outputs = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy"], indices)
 
         densepose_predictor_outputs_o2m = None
+        segm_outputs_o2m = None
         if "pred_boxes_xyxy_o2m" in out.keys():
             # If we have indices for matched o2m boxes, only use those in densepose head
             if "indices_o2m" in out.keys():
                 indices_o2m = out["indices_o2m"]
-            densepose_predictor_outputs_o2m = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy_o2m"], indices_o2m)
+            densepose_predictor_outputs_o2m, segm_outputs_o2m = self.compute_densepose_outputs(features_list, out["pred_boxes_xyxy_o2m"], indices_o2m)
 
-        return densepose_predictor_outputs, densepose_predictor_outputs_o2m
+        return densepose_predictor_outputs, densepose_predictor_outputs_o2m, segm_outputs, segm_outputs_o2m
