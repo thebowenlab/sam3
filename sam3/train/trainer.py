@@ -53,6 +53,7 @@ from sam3.train.utils.train_utils import (
     setup_distributed_backend,
 )
 import sam3.train.data.builtin
+from sam3.train.utils.plot_sam3_batches import plot_sam3_batches
 
 
 CORE_LOSS_KEY = "core_loss"
@@ -140,6 +141,7 @@ class LoggingConf:
     scalar_keys_to_log: Optional[Dict[str, Any]] = None
     log_batch_stats: bool = False
     wandb_writer: Optional[Any] = None
+    vis_dir: str = "" 
 
 
 class Trainer:
@@ -172,6 +174,7 @@ class Trainer:
         skip_saving_ckpts: bool = False,
         empty_gpu_mem_cache_after_eval: bool = True,
         gradient_accumulation_steps: int = 1,
+        num_vis_batches: int = 5,
     ):
         self._setup_env_variables(env_variables)
         self._setup_timers()
@@ -187,6 +190,7 @@ class Trainer:
         self.meters_conf = meters
         self.loss_conf = loss
         self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.num_vis_batches = num_vis_batches
         distributed = DistributedConf(**distributed or {})
         cuda = CudaConf(**cuda or {})
         self.where = 0.0
@@ -806,6 +810,9 @@ class Trainer:
             # batch = batch.to(
             #     self.device, non_blocking=True
             # )  # move tensors in a tensorclass
+
+            if data_iter < self.num_vis_batches:
+                plot_sam3_batches(batch, batch_idx = data_iter, save_dir=self.logging_conf.vis_dir)
 
             try:
                 self._run_step(batch, phase, loss_mts, extra_loss_mts)
