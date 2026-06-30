@@ -288,7 +288,6 @@ trainer:
   val_epoch_freq: 1
   mode: train
   gradient_accumulation_steps: ${scratch.gradient_accumulation_steps}
-  num_vis_batches: 5
 
   distributed:
     backend: nccl
@@ -615,6 +614,8 @@ trainer:
     log_dir: ${launcher.experiment_log_dir}/logs/lvis
     log_freq: 10
     vis_dir: ${launcher.experiment_log_dir}/batch_vis
+    num_vis_batches: 5
+
 
 # ============================================================================
 # Launcher and Submitit Configuration
