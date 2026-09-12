@@ -247,6 +247,7 @@ scratch:
   lr_language_backbone: ${times:5e-5,${scratch.lr_scale}}
   lr_densepose_head: .01
   lr_cse_embedder: .01
+  lr_segmentation_head: .01
 
   lrd_vision_backbone: 0.9
   wd: 0.0001
@@ -262,13 +263,13 @@ scratch:
     dict_key: lvis
     with_seg_masks: ${scratch.enable_segmentation} # Note: Set this to true if using segmentation masks!
 
-  gradient_accumulation_steps: 2
+  gradient_accumulation_steps: 4
   train_batch_size: 16
   collate_fn:
     _target_: sam3.train.data.collator.collate_fn_api_with_chunking
     _partial_: true
     repeats: ${scratch.hybrid_repeats}
-    num_chunks: 2
+    num_chunks: 4
     dict_key: all
     with_seg_masks: ${scratch.enable_segmentation} # Note: Set this to true if using segmentation masks!
 
@@ -282,7 +283,7 @@ trainer:
   skip_saving_ckpts: False
   empty_gpu_mem_cache_after_eval: True
   skip_first_val: False
-  max_epochs: 40
+  max_epochs: 25
   accelerator: cuda
   seed_value: 123
   val_epoch_freq: 1
@@ -316,7 +317,7 @@ trainer:
         # img_folder: /home/camposadmin/Documents/lvis/combined2017
         img_folder: /home/camposadmin/Documents/lvis/train2014
         # ann_file: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_train_v1_filtered_giraffe_has_cse.json
-        ann_file: /home/camposadmin/Documents/lvis/densepose_train2014_cse_8k_subset.json
+        ann_file: /home/camposadmin/Documents/lvis/densepose_train2014_cse_filtered.json
 
       shuffle: True
       batch_size: ${scratch.train_batch_size}
@@ -337,7 +338,7 @@ trainer:
           _partial_: true
         # img_folder: /home/camposadmin/Documents/lvis/combined2017
         img_folder: /home/camposadmin/Documents/lvis/val2014
-        # ann_file: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1_filtered_giraffe_has_cse.json
+        # ann_file: /home/camposadmin/Documents/lvis/cse_densepose_lvis_v1_ds2_val_v1_filtered_8k_subset.json
         ann_file: /home/camposadmin/Documents/lvis/densepose_minival2014_cse.json
 
         transforms: ${lvis_train.val_transforms}
@@ -359,15 +360,16 @@ trainer:
     device: cpus
     eval_mode: false
     model_init_path: '/home/camposadmin/Documents/experiments/deeplab head no modulation human only/deeplab head dphead + cseembed unfrozen after encoder tuned/checkpoints/checkpoint.pt'
-    dp_init_path: /home/camposadmin/Documents/lvis/model_final_humans_deeplab.pkl
+    # model_init_path: '/home/camposadmin/Documents/experiments/deeplabhead with focal and coarse segm/finetune dl head cse+seghead+dphead+detection unfrozen, 40 epoch 74gpsm/checkpoints/checkpoint.pt'
+    # dp_init_path: /home/camposadmin/Documents/lvis/model_final_humans_deeplab.pkl
     use_deeplab_head: true
     enable_segmentation: ${scratch.enable_segmentation} # Warning: Enable this if using segmentation.
     unfrozen_prefixes: # Any model params with these prefixes will be unfrozen, and everything else frozen
       - "densepose_head" # used for predicting densepose embeddings
       - "cse_embedder" # used for embedding mesh vertices
       - "segmentation_head" # used for segmentation masks
-      - "dot_prod_scoring" # used for bbox
-      - "transformer.decoder.bbox_embed" # used for bbox
+      # - "dot_prod_scoring" # used for bbox
+      # - "transformer.decoder.bbox_embed" # used for bbox
     cse_embedder:
       _target_: sam3.model.embedders.Embedder
       embed_dim: 16
@@ -561,18 +563,18 @@ trainer:
             step_ratio: .1
           param_names:
             - 'cse_embedder.*'
-        # - scheduler:
-        #     _target_: sam3.train.optim.schedulers.WarmupMultiStepParamScheduler
-        #     base_lr: ${scratch.lr_segmentation_head}
-        #     warmup_steps: ${scratch.scheduler_warmup}
-        #     warmup_factor: .1
-        #     steps:
-        #       - 3000
-        #       - 6000
-        #       - 18000
-        #     step_ratio: .1
-        #   param_names:
-        #     - 'segmentation_head.*'
+        - scheduler:
+            _target_: sam3.train.optim.schedulers.WarmupMultiStepParamScheduler
+            base_lr: ${scratch.lr_segmentation_head}
+            warmup_steps: ${scratch.scheduler_warmup}
+            warmup_factor: .1
+            steps:
+              - 40000
+              - 60000
+              - 80000
+            step_ratio: .1
+          param_names:
+            - 'segmentation_head.*'
 
       weight_decay:
         - scheduler:
@@ -602,7 +604,7 @@ trainer:
 
   checkpoint:
     save_dir: ${launcher.experiment_log_dir}/checkpoints
-    save_freq: 0  # 0 only last checkpoint is saved.
+    save_freq: 1  # 0 only last checkpoint is saved.
 
   logging:
     tensorboard_writer:
